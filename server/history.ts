@@ -9,13 +9,14 @@ import { openSqliteDatabase, type SqliteDatabase } from './sqlite'
 
 const DOWNLOAD_HISTORY_ROUTE = '/api/history/download-speed'
 const SAMPLE_INTERVAL_MS = 30_000
-const SAMPLE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const HISTORY_BUCKET_MS = 5 * 60 * 1000
 const JSON_RPC_VERSION = '2.0'
 const SESSION_HEADER = 'X-Transmission-Session-Id'
 const outputDir = fileURLToPath(new URL('../data', import.meta.url))
-const historyDatabasePath = fileURLToPath(new URL('../data/harbor-history.sqlite', import.meta.url))
+const historyDatabasePath =
+  process.env.HARBOR_HISTORY_DATABASE_PATH ||
+  fileURLToPath(new URL('../data/harbor-history.sqlite', import.meta.url))
 
 const schemaSql = `
   PRAGMA journal_mode = WAL;
@@ -215,7 +216,7 @@ async function writeDownloadSample(
       DELETE FROM transmission_download_history
       WHERE observed_at_ms < ?
     `,
-  ).run(observedAtMs - SAMPLE_RETENTION_MS)
+  ).run(observedAtMs - HISTORY_WINDOW_MS)
 }
 
 async function sampleDownloadHistory(options: TransmissionHistoryPluginOptions) {

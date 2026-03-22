@@ -31,7 +31,7 @@ The app also exposes `/api/mullvad/status` during `bun run dev` and `bun run pre
 
 The torrent catalog lives at `/api/catalog/search`. It queries `data/torrents-catalog.parquet` with DuckDB. If the Parquet file is missing and `torrents-csv-data/torrents.csv` exists, the server will generate the Parquet file on the first catalog request.
 
-The app also exposes `/api/history/download-speed`. While the dev or preview server is running, Harbor saves Transmission download-speed samples into `data/harbor-history.sqlite` and serves the latest week as chart data.
+The app also exposes `/api/history/download-speed`. While the dev or preview server is running, Harbor saves Transmission download-speed samples into `data/harbor-history.sqlite`, serves the latest week as chart data, and prunes rows older than 7 days.
 
 `bun run dev` now starts Vite with `--host`, so it binds on your LAN and can be opened from your phone using the network URL shown in the terminal.
 
@@ -61,6 +61,7 @@ Notes:
 
 ```bash
 bun run catalog:build
+bun run history:verify
 bun run dev
 bun run build
 bun run lint

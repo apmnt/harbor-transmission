@@ -6,6 +6,7 @@
   "packageManager": "bun@1.3.5",
   "scripts": {
     "catalog:build": "node ./scripts/generate-torrent-catalog.mjs",
+    "history:verify": "bun ./scripts/verify-download-history.mjs",
     "dev": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
