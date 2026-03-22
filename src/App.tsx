@@ -271,17 +271,29 @@ function DownloadHistorySection({
 }) {
   const points = data?.points ?? [];
   const chartPoints = chartData?.points ?? points;
-  const latestPoint = points.at(-1) ?? null;
+  const latestPoint = chartPoints.at(-1) ?? null;
   const averageSpeed =
-    points.length > 0
-      ? points.reduce(
+    chartPoints.length > 0
+      ? chartPoints.reduce(
           (sum, point) => sum + point.averageDownloadSpeedBps,
           0,
-        ) / points.length
+        ) / chartPoints.length
       : 0;
   const peakSpeed =
-    points.length > 0
-      ? Math.max(...points.map((point) => point.peakDownloadSpeedBps))
+    chartPoints.length > 0
+      ? Math.max(...chartPoints.map((point) => point.peakDownloadSpeedBps))
+      : 0;
+  const lastHourCutoffMs =
+    (chartData?.rangeEndMs ?? data?.rangeEndMs ?? 0) - 60 * 60 * 1000;
+  const lastHourPoints = chartPoints.filter(
+    (point) => point.timestampMs >= lastHourCutoffMs,
+  );
+  const lastHourAverageSpeed =
+    lastHourPoints.length > 0
+      ? lastHourPoints.reduce(
+          (sum, point) => sum + point.averageDownloadSpeedBps,
+          0,
+        ) / lastHourPoints.length
       : 0;
   const lastRecordedAgeLabel = data?.lastRecordedAtMs
     ? formatHistoryAgeLabel(data.lastRecordedAtMs)
@@ -296,8 +308,8 @@ function DownloadHistorySection({
           </h2>
           <p className="text-sm text-muted-foreground">
             Latest week of daemon download speed. Harbor saves a new sample
-            every 30 seconds on the server, then extends the latest line from
-            the live client speed every second.
+            every 30 seconds on the server, while the client adds temporary
+            one-second points to keep the chart moving.
           </p>
         </div>
 
@@ -324,8 +336,12 @@ function DownloadHistorySection({
           />
           <SessionMetric
             icon={TimerReset}
-            label="Last sample"
-            value={lastRecordedAgeLabel}
+            label="Last hour avg"
+            value={
+              lastHourPoints.length > 0
+                ? formatSpeedBps(lastHourAverageSpeed)
+                : lastRecordedAgeLabel
+            }
             bottom
             last
           />

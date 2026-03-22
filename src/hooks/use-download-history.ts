@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   DOWNLOAD_HISTORY_UPDATED_EVENT,
   DownloadHistoryClient,
+  type DownloadHistoryPoint,
   getLiveDownloadHistoryResponse,
   type DownloadHistoryResponse,
 } from '@/lib/download-history'
 
 const REFRESH_INTERVAL_MS = 30_000
 const LIVE_CHART_REFRESH_INTERVAL_MS = 1_000
+const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 interface DownloadHistoryState {
   data: DownloadHistoryResponse | null
@@ -30,12 +32,17 @@ export function useDownloadHistory({
   liveDownloadSpeedBps,
 }: UseDownloadHistoryOptions) {
   const client = useMemo(() => new DownloadHistoryClient(), [])
+  const liveDownloadSpeedRef = useRef(liveDownloadSpeedBps)
   const [state, setState] = useState<DownloadHistoryState>({
     data: null,
     error: null,
     isLoading: true,
   })
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  const [livePoints, setLivePoints] = useState<DownloadHistoryPoint[]>([])
+
+  useEffect(() => {
+    liveDownloadSpeedRef.current = liveDownloadSpeedBps
+  }, [liveDownloadSpeedBps])
 
   useEffect(() => {
     let cancelled = false
@@ -92,29 +99,48 @@ export function useDownloadHistory({
   }, [client])
 
   useEffect(() => {
-    setNowMs(Date.now())
-
     if (!isLive) {
+      setLivePoints([])
       return
     }
 
+    const appendPoint = () => {
+      const nowMs = Date.now()
+      const cutoffMs = nowMs - HISTORY_WINDOW_MS
+      const lastRecordedAtMs = state.data?.lastRecordedAtMs ?? 0
+      const livePoint: DownloadHistoryPoint = {
+        timestampMs: nowMs,
+        averageDownloadSpeedBps: liveDownloadSpeedRef.current,
+        peakDownloadSpeedBps: liveDownloadSpeedRef.current,
+        sampleCount: 1,
+      }
+
+      setLivePoints((current) => [
+        ...current.filter(
+          (point) =>
+            point.timestampMs > lastRecordedAtMs && point.timestampMs >= cutoffMs,
+        ),
+        livePoint,
+      ])
+    }
+
+    appendPoint()
+
     const intervalId = window.setInterval(() => {
-      setNowMs(Date.now())
+      appendPoint()
     }, LIVE_CHART_REFRESH_INTERVAL_MS)
 
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [isLive])
+  }, [isLive, state.data?.lastRecordedAtMs])
 
   const chartData = useMemo(
     () =>
       getLiveDownloadHistoryResponse(state.data, {
-        isLive,
-        liveDownloadSpeedBps,
-        nowMs,
+        livePoints,
       }),
-    [isLive, liveDownloadSpeedBps, nowMs, state.data],
+    [livePoints, state.data],
   )
 
   return {
