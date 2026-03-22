@@ -249,7 +249,7 @@ function CatalogSection({
           <h2 className="font-display text-2xl tracking-[-0.06em] text-foreground">Catalog</h2>
           <p className="text-sm text-muted-foreground">
             Search the local Parquet mirror generated from <code>torrents-csv-data</code> and send
-            the matching <code>.torrent</code> file to Transmission with one tap.
+            the matching magnet link to Transmission with one tap.
           </p>
         </div>
 

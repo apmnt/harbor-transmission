@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { TorrentCatalogClient, type CatalogTorrent } from '@/lib/catalog'
+import { getTorrentMagnetLink, type CatalogTorrent } from '@/lib/catalog'
 import { demoSnapshot } from '@/lib/demo-data'
 import {
   MullvadStatusClient,
@@ -85,7 +85,7 @@ function createDemoCatalogTorrent(
     file_count: 1,
     primary_mime_type: 'application/x-bittorrent',
     hash_string: torrent.infohash,
-    magnet_link: `magnet:?xt=urn:btih:${torrent.infohash}`,
+    magnet_link: getTorrentMagnetLink(torrent.infohash),
     is_private: false,
     comment: 'Added from Harbor catalog',
     creator: 'Harbor',
@@ -118,7 +118,6 @@ async function getTransmissionSnapshot(client: TransmissionRpcClient) {
 
 export function useTransmission() {
   const client = useMemo(() => new TransmissionRpcClient(), [])
-  const catalogClient = useMemo(() => new TorrentCatalogClient(), [])
   const mullvadClient = useMemo(() => new MullvadStatusClient(), [])
   const [snapshot, setSnapshot] = useState<TransmissionSnapshot>({
     ...demoSnapshot,
@@ -338,13 +337,11 @@ export function useTransmission() {
     async (torrent: CatalogTorrent) => {
       await runAction(
         `catalog-${torrent.infohash}`,
-        async () => {
-          const { metainfo } = await catalogClient.getTorrentMetainfo(torrent.infohash)
-          return client.addTorrentByMetainfo(metainfo, {
+        () =>
+          client.addTorrentByUrl(getTorrentMagnetLink(torrent.infohash), {
             downloadDir: snapshot.session.download_dir,
             paused: snapshot.session.start_added_torrents === false,
-          })
-        },
+          }),
         (current) => {
           if (current.torrents.some((value) => value.hash_string === torrent.infohash)) {
             return {
@@ -373,7 +370,7 @@ export function useTransmission() {
         },
       )
     },
-    [catalogClient, client, runAction, snapshot.session.download_dir, snapshot.session.start_added_torrents],
+    [client, runAction, snapshot.session.download_dir, snapshot.session.start_added_torrents],
   )
 
   return {

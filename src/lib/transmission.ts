@@ -291,22 +291,15 @@ export class TransmissionRpcClient {
     return this.request('torrent_remove', ids.length > 0 ? { ids, delete_local_data: deleteLocalData } : undefined)
   }
 
-  async addTorrentByUrl(url: string, paused = false) {
-    return this.request('torrent_add', {
-      filename: url,
-      paused,
-    })
-  }
-
-  async addTorrentByMetainfo(
-    metainfo: string,
+  async addTorrentByUrl(
+    url: string,
     options: {
       downloadDir?: string
       paused?: boolean
     } = {},
   ) {
     return this.request('torrent_add', {
-      metainfo,
+      filename: url,
       paused: options.paused,
       ...(options.downloadDir ? { download_dir: options.downloadDir } : {}),
     })

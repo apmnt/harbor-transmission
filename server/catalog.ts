@@ -1,5 +1,4 @@
 import { access, mkdir, rm } from 'node:fs/promises'
-import { Buffer } from 'node:buffer'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { fileURLToPath } from 'node:url'
 
@@ -7,7 +6,6 @@ import { DuckDBInstance } from '@duckdb/node-api'
 import type { Plugin } from 'vite'
 
 const CATALOG_ROUTE = '/api/catalog/search'
-const CATALOG_TORRENT_ROUTE = '/api/catalog/torrent'
 const MIN_QUERY_LENGTH = 2
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -73,12 +71,6 @@ interface CatalogSearchResponse {
   offset: number
 }
 
-interface CatalogTorrentFileResponse {
-  infohash: string
-  metainfo: string
-  sourceUrl: string
-}
-
 interface MiddlewareStack {
   use: (
     handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void,
@@ -113,10 +105,6 @@ function normalizeQuery(value: string | null) {
 
 function isInfohash(value: string) {
   return /^[a-f0-9]{40}$/i.test(value)
-}
-
-function getTorrentFileUrl(infohash: string) {
-  return `https://itorrents.org/torrent/${infohash.toUpperCase()}.torrent`
 }
 
 function getDuckDbInstance() {
@@ -211,38 +199,6 @@ async function ensureCatalogParquet() {
   }
 
   await generationPromise
-}
-
-async function fetchTorrentMetainfo(infohash: string): Promise<CatalogTorrentFileResponse> {
-  const normalizedInfohash = infohash.toLowerCase()
-
-  if (!isInfohash(normalizedInfohash)) {
-    throw new Error('Invalid infohash.')
-  }
-
-  const sourceUrl = getTorrentFileUrl(normalizedInfohash)
-  const response = await fetch(sourceUrl, {
-    headers: {
-      Accept: 'application/x-bittorrent, */*',
-      'cache-control': 'no-cache',
-    },
-    redirect: 'follow',
-  })
-
-  if (!response.ok) {
-    throw new Error(`Torrent file fetch failed with ${response.status}.`)
-  }
-
-  const metainfo = Buffer.from(await response.arrayBuffer()).toString('base64')
-  if (!metainfo) {
-    throw new Error('Fetched torrent file was empty.')
-  }
-
-  return {
-    infohash: normalizedInfohash,
-    metainfo,
-    sourceUrl,
-  }
 }
 
 function parseSearchParams(req: IncomingMessage): SearchParams {
@@ -362,10 +318,6 @@ function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {
   res.end(JSON.stringify(payload))
 }
 
-function writeBadRequest(res: ServerResponse, message: string) {
-  writeJson(res, 400, { error: message })
-}
-
 function writeMethodNotAllowed(res: ServerResponse) {
   res.statusCode = 405
   res.setHeader('allow', 'GET')
@@ -388,32 +340,8 @@ function createRouteHandler() {
   }
 }
 
-function createTorrentFileRouteHandler() {
-  return async (req: IncomingMessage, res: ServerResponse) => {
-    if (req.method !== 'GET') {
-      writeMethodNotAllowed(res)
-      return
-    }
-
-    const url = new URL(req.url ?? CATALOG_TORRENT_ROUTE, 'http://127.0.0.1')
-    const infohash = normalizeQuery(url.searchParams.get('infohash'))
-
-    if (!isInfohash(infohash)) {
-      writeBadRequest(res, 'A valid 40-character infohash is required.')
-      return
-    }
-
-    try {
-      writeJson(res, 200, await fetchTorrentMetainfo(infohash))
-    } catch (error) {
-      writeJson(res, 500, { error: getErrorMessage(error) })
-    }
-  }
-}
-
 function attachCatalogRoute(middlewares: MiddlewareStack) {
   const searchHandler = createRouteHandler()
-  const torrentFileHandler = createTorrentFileRouteHandler()
 
   middlewares.use((req, res, next) => {
     const pathname = req.url?.split('?')[0]
@@ -422,12 +350,7 @@ function attachCatalogRoute(middlewares: MiddlewareStack) {
       return
     }
 
-    if (pathname === CATALOG_TORRENT_ROUTE) {
-      void torrentFileHandler(req, res)
-      return
-    }
-
-    if (pathname !== CATALOG_ROUTE && pathname !== CATALOG_TORRENT_ROUTE) {
+    if (pathname !== CATALOG_ROUTE) {
       next()
     }
   })
