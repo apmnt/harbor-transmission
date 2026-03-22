@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { getTorrentMagnetLink, type CatalogTorrent } from '@/lib/catalog'
 import { demoSnapshot } from '@/lib/demo-data'
-import {
-  DownloadHistoryClient,
-  notifyDownloadHistoryUpdated,
-} from '@/lib/download-history'
 import {
   MullvadStatusClient,
   unavailableMullvadStatus,
@@ -146,14 +142,12 @@ function getMullvadStatusOnce(client: MullvadStatusClient) {
 
 export function useTransmission() {
   const client = useMemo(() => new TransmissionRpcClient(), [])
-  const downloadHistoryClient = useMemo(() => new DownloadHistoryClient(), [])
   const mullvadClient = useMemo(() => new MullvadStatusClient(), [])
   const [snapshot, setSnapshot] = useState<TransmissionSnapshot>({
     ...demoSnapshot,
     isLoading: true,
   })
   const [pendingAction, setPendingAction] = useState<string | null>(null)
-  const lastHistoryWriteAtRef = useRef(0)
   const refreshIntervalMs = snapshot.mode === 'live' && snapshot.error === null ? 1000 : 5000
 
   const refresh = useCallback(
@@ -167,21 +161,6 @@ export function useTransmission() {
       ]).then(([result]) => result)
 
       if (transmissionResult.status === 'fulfilled') {
-        const now = Date.now()
-
-        if (now - lastHistoryWriteAtRef.current >= 30_000) {
-          try {
-            await downloadHistoryClient.recordSample({
-              downloadSpeedBps: transmissionResult.value.stats.download_speed,
-              uploadSpeedBps: transmissionResult.value.stats.upload_speed,
-            })
-            lastHistoryWriteAtRef.current = now
-            notifyDownloadHistoryUpdated()
-          } catch {
-            // History writes should not block the main Transmission UI.
-          }
-        }
-
         setSnapshot((current) => ({
           mode: 'live',
           session: transmissionResult.value.session,
@@ -217,7 +196,7 @@ export function useTransmission() {
         }
       })
     },
-    [client, downloadHistoryClient],
+    [client],
   )
 
   useEffect(() => {

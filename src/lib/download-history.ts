@@ -14,52 +14,6 @@ export interface DownloadHistoryResponse {
   lastRecordedAtMs: number | null
 }
 
-interface LiveDownloadHistoryOptions {
-  livePoints: DownloadHistoryPoint[]
-}
-
-export const DOWNLOAD_HISTORY_UPDATED_EVENT = 'harbor:download-history-updated'
-
-export function notifyDownloadHistoryUpdated() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  window.dispatchEvent(new Event(DOWNLOAD_HISTORY_UPDATED_EVENT))
-}
-
-export function getLiveDownloadHistoryResponse(
-  data: DownloadHistoryResponse | null,
-  { livePoints }: LiveDownloadHistoryOptions,
-) {
-  if (!data && livePoints.length === 0) {
-    return null
-  }
-
-  if (!data) {
-    const rangeEndMs = livePoints.at(-1)?.timestampMs ?? Date.now()
-
-    return {
-      points: livePoints,
-      bucketMs: 1_000,
-      capturedEveryMs: 1_000,
-      rangeStartMs: rangeEndMs - 7 * 24 * 60 * 60 * 1000,
-      rangeEndMs,
-      lastRecordedAtMs: null,
-    }
-  }
-
-  if (livePoints.length === 0) {
-    return data
-  }
-
-  return {
-    ...data,
-    points: [...data.points, ...livePoints],
-    rangeEndMs: Math.max(data.rangeEndMs, livePoints.at(-1)?.timestampMs ?? data.rangeEndMs),
-  }
-}
-
 export class DownloadHistoryClient {
   private endpoint: string
 

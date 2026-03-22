@@ -214,9 +214,10 @@ function App() {
 
       <DownloadHistorySection
         data={downloadHistory.data}
-        chartData={downloadHistory.chartData}
         error={downloadHistory.error}
         isLoading={downloadHistory.isLoading}
+        isLive={isLiveConnection}
+        liveData={downloadHistory.liveData}
       />
 
       <QueueSection
@@ -254,38 +255,46 @@ function App() {
 const downloadHistoryChartConfig = {
   averageDownloadSpeedBps: {
     color: "oklch(0.57 0 0)",
-    label: "Average download",
+    label: "Weekly average",
+  },
+} satisfies ChartConfig;
+
+const liveDownloadChartConfig = {
+  averageDownloadSpeedBps: {
+    color: "oklch(0.72 0.17 154)",
+    label: "Live download",
   },
 } satisfies ChartConfig;
 
 function DownloadHistorySection({
-  chartData,
   data,
   error,
   isLoading,
+  isLive,
+  liveData,
 }: {
-  chartData: DownloadHistoryResponse | null;
   data: DownloadHistoryResponse | null;
   error: string | null;
   isLoading: boolean;
+  isLive: boolean;
+  liveData: DownloadHistoryResponse | null;
 }) {
   const points = data?.points ?? [];
-  const chartPoints = chartData?.points ?? points;
-  const latestPoint = chartPoints.at(-1) ?? null;
+  const latestPoint = points.at(-1) ?? null;
   const averageSpeed =
-    chartPoints.length > 0
-      ? chartPoints.reduce(
+    points.length > 0
+      ? points.reduce(
           (sum, point) => sum + point.averageDownloadSpeedBps,
           0,
-        ) / chartPoints.length
+        ) / points.length
       : 0;
   const peakSpeed =
-    chartPoints.length > 0
-      ? Math.max(...chartPoints.map((point) => point.peakDownloadSpeedBps))
+    points.length > 0
+      ? Math.max(...points.map((point) => point.peakDownloadSpeedBps))
       : 0;
   const lastHourCutoffMs =
-    (chartData?.rangeEndMs ?? data?.rangeEndMs ?? 0) - 60 * 60 * 1000;
-  const lastHourPoints = chartPoints.filter(
+    (data?.rangeEndMs ?? liveData?.rangeEndMs ?? 0) - 60 * 60 * 1000;
+  const lastHourPoints = (points.length > 0 ? points : liveData?.points ?? []).filter(
     (point) => point.timestampMs >= lastHourCutoffMs,
   );
   const lastHourAverageSpeed =
@@ -307,9 +316,8 @@ function DownloadHistorySection({
             Download history
           </h2>
           <p className="text-sm text-muted-foreground">
-            Latest week of daemon download speed. Harbor saves a new sample
-            every 30 seconds on the server, while the client adds temporary
-            one-second points to keep the chart moving.
+            Weekly history is loaded once from the server. The live monitor
+            starts fresh on page load and rolls forward every second.
           </p>
         </div>
 
@@ -367,69 +375,174 @@ function DownloadHistorySection({
                 Harbor is reading the local history database.
               </p>
             </div>
-          ) : chartPoints.length > 0 ? (
-            <ChartContainer
-              config={downloadHistoryChartConfig}
-              className="h-72 min-h-[18rem] border-y border-border py-3"
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={chartPoints}
-                  margin={{ top: 16, right: 8, bottom: 12, left: 0 }}
-                >
-                  <CartesianGrid vertical={false} />
-                  <XAxis
-                    axisLine={false}
-                    dataKey="timestampMs"
-                    minTickGap={36}
-                    tickFormatter={formatHistoryAxisLabel}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickFormatter={(value) => formatSpeedBps(Number(value))}
-                    tickLine={false}
-                    width={78}
-                  />
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        formatter={(value) =>
-                          formatSpeedBps(Number(value ?? 0))
-                        }
-                        labelFormatter={(value) =>
-                          formatHistoryTooltipLabel(Number(value ?? 0))
-                        }
-                      />
-                    }
-                    cursor={false}
-                  />
-                  <Line
-                    dataKey="averageDownloadSpeedBps"
-                    dot={false}
-                    isAnimationActive={false}
-                    stroke="var(--color-averageDownloadSpeedBps)"
-                    strokeWidth={2}
-                    type="monotone"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartContainer>
           ) : (
-            <div className="border-y border-border py-12 text-center">
-              <ChartNoAxesCombined className="mx-auto size-8 text-muted-foreground" />
-              <p className="mt-3 font-medium text-foreground">
-                No download history recorded yet.
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Keep Harbor running for at least one 30-second sample interval
-                to start building the weekly chart.
-              </p>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-medium text-foreground">
+                      Weekly snapshot
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      Fixed history loaded from the server on page load.
+                    </p>
+                  </div>
+                </div>
+
+                {points.length > 0 ? (
+                  <DownloadSpeedChart
+                    animated={false}
+                    config={downloadHistoryChartConfig}
+                    domainEndMs={data?.rangeEndMs ?? 0}
+                    domainStartMs={data?.rangeStartMs ?? 0}
+                    emptyMessage="No weekly samples available."
+                    points={points}
+                    tooltipLabelFormatter={formatHistoryTooltipLabel}
+                    xAxisTickFormatter={formatHistoryAxisLabel}
+                  />
+                ) : (
+                  <div className="border-y border-border py-12 text-center">
+                    <ChartNoAxesCombined className="mx-auto size-8 text-muted-foreground" />
+                    <p className="mt-3 font-medium text-foreground">
+                      No download history recorded yet.
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Keep Harbor running for at least one 30-second server
+                      sample to start building the weekly chart.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-medium text-foreground">
+                      Live monitor
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      Fresh in-memory samples collected every second in a
+                      rolling five-minute window.
+                    </p>
+                  </div>
+                </div>
+
+                {liveData && liveData.points.length > 0 ? (
+                  <DownloadSpeedChart
+                    animated
+                    config={liveDownloadChartConfig}
+                    domainEndMs={liveData.rangeEndMs}
+                    domainStartMs={liveData.rangeStartMs}
+                    emptyMessage="Waiting for live download samples."
+                    points={liveData.points}
+                    tooltipLabelFormatter={formatLiveHistoryTooltipLabel}
+                    xAxisTickFormatter={formatLiveHistoryAxisLabel}
+                  />
+                ) : (
+                  <div className="border-y border-border py-12 text-center">
+                    <Activity className="mx-auto size-8 text-muted-foreground" />
+                    <p className="mt-3 font-medium text-foreground">
+                      {isLive
+                        ? "Waiting for live download samples."
+                        : "Live monitor starts when Harbor connects."}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      The live chart is separate from the weekly server
+                      history and starts fresh on every page load.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
       </div>
     </section>
+  );
+}
+
+function DownloadSpeedChart({
+  animated,
+  config,
+  domainEndMs,
+  domainStartMs,
+  emptyMessage,
+  points,
+  tooltipLabelFormatter,
+  xAxisTickFormatter,
+}: {
+  animated: boolean;
+  config: ChartConfig;
+  domainEndMs: number;
+  domainStartMs: number;
+  emptyMessage: string;
+  points: DownloadHistoryResponse["points"];
+  tooltipLabelFormatter: (timestampMs: number) => string;
+  xAxisTickFormatter: (timestampMs: number) => string;
+}) {
+  if (points.length === 0) {
+    return (
+      <div className="border-y border-border py-12 text-center">
+        <ChartNoAxesCombined className="mx-auto size-8 text-muted-foreground" />
+        <p className="mt-3 font-medium text-foreground">{emptyMessage}</p>
+      </div>
+    );
+  }
+
+  return (
+    <ChartContainer
+      config={config}
+      className="h-64 min-h-[16rem] border-y border-border py-3"
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart
+          data={points}
+          margin={{ top: 16, right: 8, bottom: 12, left: 0 }}
+        >
+          <CartesianGrid vertical={false} />
+          <XAxis
+            allowDataOverflow
+            axisLine={false}
+            dataKey="timestampMs"
+            domain={[domainStartMs, domainEndMs]}
+            minTickGap={36}
+            scale="time"
+            tickFormatter={xAxisTickFormatter}
+            tickLine={false}
+            type="number"
+          />
+          <YAxis
+            axisLine={false}
+            tickFormatter={(value) => formatSpeedBps(Number(value))}
+            tickLine={false}
+            width={78}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                formatter={(value) => formatSpeedBps(Number(value ?? 0))}
+                labelFormatter={(value) =>
+                  tooltipLabelFormatter(Number(value ?? 0))
+                }
+              />
+            }
+            cursor={false}
+          />
+          <Line
+            activeDot={false}
+            animationDuration={animated ? 900 : 0}
+            animationEasing="linear"
+            dataKey="averageDownloadSpeedBps"
+            dot={false}
+            isAnimationActive={animated}
+            stroke="var(--color-averageDownloadSpeedBps)"
+            strokeLinecap="round"
+            strokeWidth={2}
+            type="monotone"
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </ChartContainer>
   );
 }
 
@@ -1650,6 +1763,20 @@ function formatHistoryTooltipLabel(timestampMs: number) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
+  }).format(new Date(timestampMs));
+}
+
+function formatLiveHistoryAxisLabel(timestampMs: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(timestampMs));
+}
+
+function formatLiveHistoryTooltipLabel(timestampMs: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    timeStyle: "medium",
   }).format(new Date(timestampMs));
 }
 

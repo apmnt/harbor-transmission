@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  DOWNLOAD_HISTORY_UPDATED_EVENT,
   DownloadHistoryClient,
   type DownloadHistoryPoint,
-  getLiveDownloadHistoryResponse,
   type DownloadHistoryResponse,
 } from '@/lib/download-history'
 
-const REFRESH_INTERVAL_MS = 30_000
 const LIVE_CHART_REFRESH_INTERVAL_MS = 1_000
-const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+const LIVE_CHART_WINDOW_MS = 5 * 60 * 1000
 
 interface DownloadHistoryState {
   data: DownloadHistoryResponse | null
@@ -46,18 +43,11 @@ export function useDownloadHistory({
 
   useEffect(() => {
     let cancelled = false
-    let timeoutId: number | undefined
+    const abortController = new AbortController()
 
-    const loadHistory = async (silent = false) => {
-      if (!silent) {
-        setState((current) => ({
-          ...current,
-          isLoading: true,
-        }))
-      }
-
+    const loadHistory = async () => {
       try {
-        const data = await client.getLatestWeek()
+        const data = await client.getLatestWeek({ signal: abortController.signal })
         if (cancelled) return
 
         setState({
@@ -73,41 +63,24 @@ export function useDownloadHistory({
           error: getErrorMessage(error),
           isLoading: false,
         }))
-      } finally {
-        if (!cancelled) {
-          timeoutId = window.setTimeout(() => {
-            void loadHistory(true)
-          }, REFRESH_INTERVAL_MS)
-        }
       }
     }
 
-    const handleHistoryUpdated = () => {
-      void loadHistory(true)
-    }
-
-    window.addEventListener(DOWNLOAD_HISTORY_UPDATED_EVENT, handleHistoryUpdated)
     void loadHistory()
 
     return () => {
       cancelled = true
-      window.removeEventListener(DOWNLOAD_HISTORY_UPDATED_EVENT, handleHistoryUpdated)
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId)
-      }
+      abortController.abort()
     }
   }, [client])
 
   useEffect(() => {
     if (!isLive) {
-      setLivePoints([])
       return
     }
 
     const appendPoint = () => {
       const nowMs = Date.now()
-      const cutoffMs = nowMs - HISTORY_WINDOW_MS
-      const lastRecordedAtMs = state.data?.lastRecordedAtMs ?? 0
       const livePoint: DownloadHistoryPoint = {
         timestampMs: nowMs,
         averageDownloadSpeedBps: liveDownloadSpeedRef.current,
@@ -116,10 +89,7 @@ export function useDownloadHistory({
       }
 
       setLivePoints((current) => [
-        ...current.filter(
-          (point) =>
-            point.timestampMs > lastRecordedAtMs && point.timestampMs >= cutoffMs,
-        ),
+        ...current.filter((point) => point.timestampMs >= nowMs - LIVE_CHART_WINDOW_MS),
         livePoint,
       ])
     }
@@ -133,18 +103,27 @@ export function useDownloadHistory({
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [isLive, state.data?.lastRecordedAtMs])
+  }, [isLive])
 
-  const chartData = useMemo(
-    () =>
-      getLiveDownloadHistoryResponse(state.data, {
-        livePoints,
-      }),
-    [livePoints, state.data],
-  )
+  const liveData = useMemo<DownloadHistoryResponse | null>(() => {
+    if (livePoints.length === 0) {
+      return null
+    }
+
+    const rangeEndMs = livePoints.at(-1)?.timestampMs ?? 0
+
+    return {
+      points: livePoints,
+      bucketMs: LIVE_CHART_REFRESH_INTERVAL_MS,
+      capturedEveryMs: LIVE_CHART_REFRESH_INTERVAL_MS,
+      rangeStartMs: rangeEndMs - LIVE_CHART_WINDOW_MS,
+      rangeEndMs,
+      lastRecordedAtMs: null,
+    }
+  }, [livePoints])
 
   return {
     ...state,
-    chartData,
+    liveData,
   }
 }
