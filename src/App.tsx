@@ -3,6 +3,7 @@ import {
   Activity,
   ArrowDown,
   ArrowUp,
+  ChartNoAxesCombined,
   CheckCircle2,
   ChevronDown,
   Copy,
@@ -25,6 +26,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HalftoneTransition } from "@/components/halftone-transition";
 import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -36,8 +43,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { useDownloadHistory } from "@/hooks/use-download-history";
 import { useTorrentCatalog } from "@/hooks/use-torrent-catalog";
 import { useTransmission } from "@/hooks/use-transmission";
+import type { DownloadHistoryResponse } from "@/lib/download-history";
 import type { CatalogTorrent } from "@/lib/catalog";
 import {
   getMullvadLocationLabel,
@@ -75,6 +84,14 @@ import {
   formatTimestamp,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 const filters: { label: string; value: TorrentFilter }[] = [
   { label: "All", value: "all" },
@@ -106,6 +123,7 @@ function App() {
     startAll,
     toggleTorrent,
   } = useTransmission();
+  const downloadHistory = useDownloadHistory();
   const catalog = useTorrentCatalog();
   const [filter, setFilter] = useState<TorrentFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("queue");
@@ -184,6 +202,12 @@ function App() {
         results={catalog.results}
       />
 
+      <DownloadHistorySection
+        data={downloadHistory.data}
+        error={downloadHistory.error}
+        isLoading={downloadHistory.isLoading}
+      />
+
       <QueueSection
         copiedTorrentId={copiedTorrentId}
         counts={counts}
@@ -213,6 +237,169 @@ function App() {
         totalRatio={totalRatio}
       />
     </div>
+  );
+}
+
+const downloadHistoryChartConfig = {
+  averageDownloadSpeedBps: {
+    color: "oklch(0.57 0 0)",
+    label: "Average download",
+  },
+} satisfies ChartConfig;
+
+function DownloadHistorySection({
+  data,
+  error,
+  isLoading,
+}: {
+  data: DownloadHistoryResponse | null;
+  error: string | null;
+  isLoading: boolean;
+}) {
+  const points = data?.points ?? [];
+  const latestPoint = points.at(-1) ?? null;
+  const averageSpeed =
+    points.length > 0
+      ? points.reduce(
+          (sum, point) => sum + point.averageDownloadSpeedBps,
+          0,
+        ) / points.length
+      : 0;
+  const peakSpeed =
+    points.length > 0
+      ? Math.max(...points.map((point) => point.peakDownloadSpeedBps))
+      : 0;
+  const lastRecordedAgeLabel = data?.lastRecordedAtMs
+    ? formatHistoryAgeLabel(data.lastRecordedAtMs)
+    : "No samples yet";
+
+  return (
+    <section className="w-full border-b border-border bg-background">
+      <div className="w-full min-w-0 px-3 py-4 sm:px-5 lg:px-6">
+        <div className="space-y-1">
+          <h2 className="font-display text-2xl tracking-[-0.06em] text-foreground">
+            Download history
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Latest week of daemon download speed. Harbor saves a new sample
+            every 30 seconds while the server is running and charts them as
+            5-minute averages.
+          </p>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 border-y border-border xl:grid-cols-4">
+          <SessionMetric
+            icon={ArrowDown}
+            label="Weekly average"
+            value={formatSpeedBps(averageSpeed)}
+          />
+          <SessionMetric
+            icon={Gauge}
+            label="Weekly peak"
+            value={formatSpeedBps(peakSpeed)}
+          />
+          <SessionMetric
+            icon={RefreshCw}
+            label="Latest bucket"
+            value={
+              latestPoint
+                ? formatSpeedBps(latestPoint.averageDownloadSpeedBps)
+                : "No data"
+            }
+            bottom
+          />
+          <SessionMetric
+            icon={TimerReset}
+            label="Last sample"
+            value={lastRecordedAgeLabel}
+            bottom
+            last
+          />
+        </div>
+
+        {error && !data ? (
+          <div className="mt-4 border-y border-border bg-muted/35 px-3 py-3 text-sm">
+            <p className="font-semibold text-foreground">
+              Download history is unavailable.
+            </p>
+            <p className="mt-1 text-muted-foreground">{error}</p>
+          </div>
+        ) : null}
+
+        <div className="mt-4 min-w-0">
+          {isLoading && !data ? (
+            <div className="border-y border-border py-12 text-center">
+              <RefreshCw className="mx-auto size-8 animate-spin text-muted-foreground" />
+              <p className="mt-3 font-medium text-foreground">
+                Loading weekly download history.
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Harbor is reading the local history database.
+              </p>
+            </div>
+          ) : points.length > 0 ? (
+            <ChartContainer
+              config={downloadHistoryChartConfig}
+              className="h-72 min-h-[18rem] border-y border-border py-3"
+            >
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={points}
+                  margin={{ top: 16, right: 8, bottom: 12, left: 0 }}
+                >
+                  <CartesianGrid vertical={false} />
+                  <XAxis
+                    axisLine={false}
+                    dataKey="timestampMs"
+                    minTickGap={36}
+                    tickFormatter={formatHistoryAxisLabel}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickFormatter={(value) => formatSpeedBps(Number(value))}
+                    tickLine={false}
+                    width={78}
+                  />
+                  <ChartTooltip
+                    content={
+                      <ChartTooltipContent
+                        formatter={(value) =>
+                          formatSpeedBps(Number(value ?? 0))
+                        }
+                        labelFormatter={(value) =>
+                          formatHistoryTooltipLabel(Number(value ?? 0))
+                        }
+                      />
+                    }
+                    cursor={false}
+                  />
+                  <Line
+                    dataKey="averageDownloadSpeedBps"
+                    dot={false}
+                    isAnimationActive={false}
+                    stroke="var(--color-averageDownloadSpeedBps)"
+                    strokeWidth={2}
+                    type="monotone"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          ) : (
+            <div className="border-y border-border py-12 text-center">
+              <ChartNoAxesCombined className="mx-auto size-8 text-muted-foreground" />
+              <p className="mt-3 font-medium text-foreground">
+                No download history recorded yet.
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Keep Harbor running for at least one 30-second sample interval
+                to start building the weekly chart.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1400,6 +1587,34 @@ function formatCatalogPublishedAt(torrent: CatalogTorrent) {
   const timestamp =
     torrent.published ?? torrent.createdUnix ?? torrent.scrapedDate;
   return timestamp ? formatTimestamp(timestamp) : "N/A";
+}
+
+function formatHistoryAxisLabel(timestampMs: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(timestampMs));
+}
+
+function formatHistoryTooltipLabel(timestampMs: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestampMs));
+}
+
+function formatHistoryAgeLabel(timestampMs: number) {
+  const elapsedSeconds = Math.max(
+    0,
+    Math.round((Date.now() - timestampMs) / 1000),
+  );
+
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s ago`;
+  }
+
+  return `${formatDuration(elapsedSeconds, 1)} ago`;
 }
 
 export default App;

@@ -20,6 +20,9 @@ import {
   type TransmissionTorrent,
 } from '@/lib/transmission'
 
+let mullvadStatusPromise: Promise<MullvadStatus> | null = null
+let mullvadStatusCache: MullvadStatus | null = null
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to reach Transmission RPC.'
 }
@@ -118,6 +121,24 @@ async function getTransmissionSnapshot(client: TransmissionRpcClient) {
   }
 }
 
+function getMullvadStatusOnce(client: MullvadStatusClient) {
+  if (mullvadStatusCache) {
+    return Promise.resolve(mullvadStatusCache)
+  }
+
+  if (!mullvadStatusPromise) {
+    mullvadStatusPromise = client
+      .getStatus()
+      .catch((error) => getUnavailableMullvadSnapshot(error))
+      .then((status) => {
+        mullvadStatusCache = status
+        return status
+      })
+  }
+
+  return mullvadStatusPromise
+}
+
 export function useTransmission() {
   const client = useMemo(() => new TransmissionRpcClient(), [])
   const mullvadClient = useMemo(() => new MullvadStatusClient(), [])
@@ -134,15 +155,9 @@ export function useTransmission() {
         setSnapshot((current) => ({ ...current, isLoading: true }))
       }
 
-      const [transmissionResult, mullvadResult] = await Promise.allSettled([
+      const transmissionResult = await Promise.allSettled([
         getTransmissionSnapshot(client),
-        mullvadClient.getStatus(),
-      ])
-
-      const nextMullvad =
-        mullvadResult.status === 'fulfilled'
-          ? mullvadResult.value
-          : getUnavailableMullvadSnapshot(mullvadResult.reason)
+      ]).then(([result]) => result)
 
       if (transmissionResult.status === 'fulfilled') {
         setSnapshot((current) => ({
@@ -151,7 +166,7 @@ export function useTransmission() {
           stats: transmissionResult.value.stats,
           torrents: transmissionResult.value.torrents,
           freeSpace: transmissionResult.value.freeSpace ?? current.freeSpace,
-          mullvad: nextMullvad,
+          mullvad: current.mullvad,
           error: null,
           isLoading: false,
           lastUpdated: new Date().toISOString(),
@@ -165,7 +180,6 @@ export function useTransmission() {
         if (current.hasLiveData) {
           return {
             ...current,
-            mullvad: nextMullvad,
             error: message,
             isLoading: false,
             lastUpdated: current.lastUpdated ?? new Date().toISOString(),
@@ -174,15 +188,32 @@ export function useTransmission() {
 
         return {
           ...demoSnapshot,
-          mullvad: nextMullvad,
+          mullvad: current.mullvad,
           error: message,
           isLoading: false,
           lastUpdated: new Date().toISOString(),
         }
       })
     },
-    [client, mullvadClient],
+    [client],
   )
+
+  useEffect(() => {
+    let cancelled = false
+
+    void getMullvadStatusOnce(mullvadClient).then((mullvad) => {
+      if (cancelled) return
+
+      setSnapshot((current) => ({
+        ...current,
+        mullvad,
+      }))
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [mullvadClient])
 
   useEffect(() => {
     let cancelled = false

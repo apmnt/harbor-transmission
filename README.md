@@ -11,6 +11,7 @@ The app is designed around Transmission's existing web interface and RPC model. 
 - Session telemetry panel for speed limits, queue settings, ratios, and free space
 - Mullvad VPN status with public exit detection, active usage, and current exit IP/location
 - DuckDB-backed torrent catalog search over a generated Parquet dataset
+- Weekly download-speed history chart backed by 30-second server-side sampling into DuckDB
 - One-click magnet adds from the catalog UI using Transmission's native `torrent-add` URL flow
 - Torrent cards with queue state, progress, ETA, peer details, labels, and quick start/pause controls
 - Demo fallback when the local Transmission RPC endpoint is unavailable
@@ -29,6 +30,8 @@ By default the Vite dev server proxies `/transmission/*` to `http://127.0.0.1:90
 The app also exposes `/api/mullvad/status` during `bun run dev` and `bun run preview`. That endpoint queries Mullvad's public connection-check APIs, which works for direct Mullvad connections and Tailscale sessions using Mullvad as an exit node.
 
 The torrent catalog lives at `/api/catalog/search`. It queries `data/torrents-catalog.parquet` with DuckDB. If the Parquet file is missing and `torrents-csv-data/torrents.csv` exists, the server will generate the Parquet file on the first catalog request.
+
+The app also exposes `/api/history/download-speed`. While the dev or preview server is running, Harbor samples Transmission's current session download speed every 30 seconds into `data/harbor-history.duckdb` and serves the latest week as chart data.
 
 `bun run dev` now starts Vite with `--host`, so it binds on your LAN and can be opened from your phone using the network URL shown in the terminal.
 
@@ -52,7 +55,7 @@ Notes:
 - `VITE_TORRENT_CATALOG_URL` is the client-side DuckDB search endpoint. The default is `/api/catalog/search`.
 - `VITE_MULLVAD_STATUS_URL` is the client-side Mullvad status URL. The default is `/api/mullvad/status`.
 - For a production/static deployment, serve the built app behind a proxy that exposes Transmission RPC at the same origin, or set `VITE_TRANSMISSION_RPC_URL` to a compatible endpoint.
-- For a production/static deployment, expose same-origin endpoints compatible with `/api/catalog/search` and `/api/mullvad/status`, or point `VITE_TORRENT_CATALOG_URL` and `VITE_MULLVAD_STATUS_URL` at wherever those endpoints live.
+- For a production/static deployment, expose same-origin endpoints compatible with `/api/catalog/search`, `/api/mullvad/status`, and `/api/history/download-speed`, or point the client at compatible replacements.
 
 ## Scripts
 
@@ -76,4 +79,5 @@ bun run preview
 ## Current limitations
 
 - Production use still needs same-origin infrastructure for Transmission RPC, catalog search, and Mullvad status, or explicit compatible endpoint URLs for all three.
+- The weekly history chart only fills while Harbor's own server process is running, because the 30-second sampler lives in the local Vite middleware.
 - The demo mode is intentional fallback UI for disconnected development; it is not a daemon simulator.

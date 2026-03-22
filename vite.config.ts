@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
 
 import { torrentCatalogPlugin } from './server/catalog'
+import { transmissionHistoryPlugin } from './server/history'
 import { mullvadStatusPlugin } from './server/mullvad'
 
 // https://vite.dev/config/
@@ -15,7 +16,12 @@ export default defineConfig(({ mode }) => {
   const password = env.TRANSMISSION_RPC_PASSWORD || ''
 
   return {
-    plugins: [react(), torrentCatalogPlugin(), mullvadStatusPlugin()],
+    plugins: [
+      react(),
+      torrentCatalogPlugin(),
+      transmissionHistoryPlugin({ target, username, password }),
+      mullvadStatusPlugin(),
+    ],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),

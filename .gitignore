@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 data/*.parquet
+data/*.duckdb
+data/*.duckdb.wal
 
 # Editor directories and files
 .vscode/*
