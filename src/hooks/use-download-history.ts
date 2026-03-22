@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import {
+  DOWNLOAD_HISTORY_UPDATED_EVENT,
   DownloadHistoryClient,
   type DownloadHistoryResponse,
 } from '@/lib/download-history'
@@ -63,10 +64,16 @@ export function useDownloadHistory() {
       }
     }
 
+    const handleHistoryUpdated = () => {
+      void loadHistory(true)
+    }
+
+    window.addEventListener(DOWNLOAD_HISTORY_UPDATED_EVENT, handleHistoryUpdated)
     void loadHistory()
 
     return () => {
       cancelled = true
+      window.removeEventListener(DOWNLOAD_HISTORY_UPDATED_EVENT, handleHistoryUpdated)
       if (timeoutId !== undefined) {
         window.clearTimeout(timeoutId)
       }

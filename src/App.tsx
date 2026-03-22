@@ -69,6 +69,7 @@ import {
   getTrackerHosts,
   isPaused,
   isQueued,
+  isSeeding,
   sortTorrents,
   torrentMatchesFilter,
   type SortMode,
@@ -118,6 +119,7 @@ function App() {
     pauseAll,
     pendingAction,
     refresh,
+    removeSeedingTorrents,
     removeTorrent,
     snapshot,
     startAll,
@@ -180,7 +182,10 @@ function App() {
         mullvad={snapshot.mullvad}
         onPauseAll={pauseAll}
         onRefresh={refresh}
+        onRemoveSeeding={removeSeedingTorrents}
         onStartAll={startAll}
+        pendingAction={pendingAction}
+        seedingCount={snapshot.torrents.filter((torrent) => isSeeding(torrent)).length}
         torrentCount={snapshot.torrents.length}
         uploadSpeed={snapshot.stats.upload_speed}
         version={snapshot.session.version}
@@ -557,7 +562,10 @@ function HeroBand({
   mullvad,
   onPauseAll,
   onRefresh,
+  onRemoveSeeding,
   onStartAll,
+  pendingAction,
+  seedingCount,
   torrentCount,
   uploadSpeed,
   version,
@@ -570,7 +578,10 @@ function HeroBand({
   mullvad: MullvadStatus;
   onPauseAll: () => void;
   onRefresh: () => void;
+  onRemoveSeeding: () => void;
   onStartAll: () => void;
+  pendingAction: string | null;
+  seedingCount: number;
   torrentCount: number;
   uploadSpeed: number;
   version: string;
@@ -612,7 +623,7 @@ function HeroBand({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-px border border-white/12 bg-white/12">
+            <div className="grid grid-cols-2 gap-px border border-white/12 bg-white/12 sm:grid-cols-4">
               <Button
                 size="sm"
                 variant="secondary"
@@ -641,6 +652,19 @@ function HeroBand({
               >
                 <Pause className="size-3.5" />
                 Pause all
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-10 justify-center rounded-none border-0 bg-white/8 px-2 text-[11px] text-white hover:bg-white/14 disabled:bg-white/6 disabled:text-white/38"
+                disabled={
+                  seedingCount === 0 ||
+                  pendingAction === "torrent-remove-seeding"
+                }
+                onClick={onRemoveSeeding}
+              >
+                <Trash2 className="size-3.5" />
+                Clear seeds
               </Button>
             </div>
           </div>

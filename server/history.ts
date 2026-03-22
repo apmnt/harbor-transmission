@@ -1,9 +1,9 @@
 import { Buffer } from 'node:buffer'
 import { mkdir } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 
-import { DuckDBInstance } from '@duckdb/node-api'
 import type { Plugin } from 'vite'
 
 const DOWNLOAD_HISTORY_ROUTE = '/api/history/download-speed'
@@ -14,14 +14,19 @@ const HISTORY_BUCKET_MS = 5 * 60 * 1000
 const JSON_RPC_VERSION = '2.0'
 const SESSION_HEADER = 'X-Transmission-Session-Id'
 const outputDir = fileURLToPath(new URL('../data', import.meta.url))
-const historyDatabasePath = fileURLToPath(new URL('../data/harbor-history.duckdb', import.meta.url))
+const historyDatabasePath = fileURLToPath(new URL('../data/harbor-history.sqlite', import.meta.url))
 
 const schemaSql = `
+  PRAGMA journal_mode = WAL;
+
   CREATE TABLE IF NOT EXISTS transmission_download_history (
-    observed_at_ms BIGINT NOT NULL,
-    download_speed_bps BIGINT NOT NULL,
-    upload_speed_bps BIGINT NOT NULL
-  )
+    observed_at_ms INTEGER NOT NULL,
+    download_speed_bps INTEGER NOT NULL,
+    upload_speed_bps INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS transmission_download_history_observed_idx
+    ON transmission_download_history (observed_at_ms);
 `
 
 interface MiddlewareStack {
@@ -57,8 +62,13 @@ interface DownloadHistoryResponse {
   lastRecordedAtMs: number | null
 }
 
-let historyInstancePromise: Promise<DuckDBInstance> | null = null
-let schemaPromise: Promise<void> | null = null
+interface DownloadHistoryIngestRequest {
+  downloadSpeedBps?: number
+  uploadSpeedBps?: number
+}
+
+let historyDatabase: DatabaseSync | null = null
+let historyReadyPromise: Promise<void> | null = null
 let samplerStarted = false
 let samplerTimeout: ReturnType<typeof setTimeout> | null = null
 let transmissionSessionId = ''
@@ -83,36 +93,24 @@ function maybeNumber(value: unknown) {
   return null
 }
 
-function getHistoryInstance() {
-  if (!historyInstancePromise) {
-    historyInstancePromise = DuckDBInstance.fromCache(historyDatabasePath)
+function getHistoryDatabase() {
+  if (!historyDatabase) {
+    historyDatabase = new DatabaseSync(historyDatabasePath)
+    historyDatabase.exec(schemaSql)
   }
 
-  return historyInstancePromise
+  return historyDatabase
 }
 
-async function withHistoryConnection<T>(callback: (connection: Awaited<ReturnType<DuckDBInstance['connect']>>) => Promise<T>) {
-  const instance = await getHistoryInstance()
-  const connection = await instance.connect()
-
-  try {
-    return await callback(connection)
-  } finally {
-    connection.closeSync()
-  }
-}
-
-async function ensureHistorySchema() {
-  if (!schemaPromise) {
-    schemaPromise = (async () => {
+async function ensureHistoryDatabase() {
+  if (!historyReadyPromise) {
+    historyReadyPromise = (async () => {
       await mkdir(outputDir, { recursive: true })
-      await withHistoryConnection(async (connection) => {
-        await connection.run(schemaSql)
-      })
+      getHistoryDatabase()
     })()
   }
 
-  await schemaPromise
+  await historyReadyPromise
 }
 
 function buildTransmissionRpcUrl(target: string) {
@@ -197,35 +195,26 @@ async function writeDownloadSample(
   downloadSpeedBps: number,
   uploadSpeedBps: number,
 ) {
-  await ensureHistorySchema()
+  await ensureHistoryDatabase()
 
-  await withHistoryConnection(async (connection) => {
-    await connection.run(
-      `
-        INSERT INTO transmission_download_history (
-          observed_at_ms,
-          download_speed_bps,
-          upload_speed_bps
-        )
-        VALUES ($observedAtMs, $downloadSpeedBps, $uploadSpeedBps)
-      `,
-      {
-        observedAtMs,
-        downloadSpeedBps,
-        uploadSpeedBps,
-      },
-    )
+  const db = getHistoryDatabase()
+  db.prepare(
+    `
+      INSERT INTO transmission_download_history (
+        observed_at_ms,
+        download_speed_bps,
+        upload_speed_bps
+      )
+      VALUES (?, ?, ?)
+    `,
+  ).run(observedAtMs, downloadSpeedBps, uploadSpeedBps)
 
-    await connection.run(
-      `
-        DELETE FROM transmission_download_history
-        WHERE observed_at_ms < $cutoffMs
-      `,
-      {
-        cutoffMs: observedAtMs - SAMPLE_RETENTION_MS,
-      },
-    )
-  })
+  db.prepare(
+    `
+      DELETE FROM transmission_download_history
+      WHERE observed_at_ms < ?
+    `,
+  ).run(observedAtMs - SAMPLE_RETENTION_MS)
 }
 
 async function sampleDownloadHistory(options: TransmissionHistoryPluginOptions) {
@@ -283,86 +272,54 @@ function stopSampler() {
   }
 }
 
-function normalizeHistoryRow(row: Record<string, unknown>): DownloadHistoryPoint | null {
-  const timestampMs = maybeNumber(row.timestamp_ms)
-  const averageDownloadSpeedBps = maybeNumber(row.average_download_speed_bps)
-  const peakDownloadSpeedBps = maybeNumber(row.peak_download_speed_bps)
-  const sampleCount = maybeNumber(row.sample_count)
-
-  if (
-    timestampMs === null ||
-    averageDownloadSpeedBps === null ||
-    peakDownloadSpeedBps === null ||
-    sampleCount === null
-  ) {
-    return null
-  }
-
-  return {
-    timestampMs,
-    averageDownloadSpeedBps,
-    peakDownloadSpeedBps,
-    sampleCount,
-  }
-}
-
 async function readDownloadHistory(): Promise<DownloadHistoryResponse> {
-  await ensureHistorySchema()
+  await ensureHistoryDatabase()
 
+  const db = getHistoryDatabase()
   const rangeEndMs = Date.now()
   const rangeStartMs = rangeEndMs - HISTORY_WINDOW_MS
 
-  return withHistoryConnection(async (connection) => {
-    const pointsReader = await connection.runAndReadAll(
+  const points = db
+    .prepare(
       `
-        WITH recent AS (
-          SELECT
-            observed_at_ms - (observed_at_ms % $bucketMs) AS timestamp_ms,
-            download_speed_bps
-          FROM transmission_download_history
-          WHERE observed_at_ms >= $rangeStartMs
-        )
         SELECT
-          timestamp_ms,
+          observed_at_ms - (observed_at_ms % ?) AS timestamp_ms,
           avg(download_speed_bps) AS average_download_speed_bps,
           max(download_speed_bps) AS peak_download_speed_bps,
           count(*) AS sample_count
-        FROM recent
+        FROM transmission_download_history
+        WHERE observed_at_ms >= ?
         GROUP BY timestamp_ms
         ORDER BY timestamp_ms ASC
       `,
-      {
-        bucketMs: HISTORY_BUCKET_MS,
-        rangeStartMs,
-      },
     )
+    .all(HISTORY_BUCKET_MS, rangeStartMs)
+    .map((row) => ({
+      timestampMs: maybeNumber(row.timestamp_ms) ?? 0,
+      averageDownloadSpeedBps: maybeNumber(row.average_download_speed_bps) ?? 0,
+      peakDownloadSpeedBps: maybeNumber(row.peak_download_speed_bps) ?? 0,
+      sampleCount: maybeNumber(row.sample_count) ?? 0,
+    }))
 
-    const lastRecordedReader = await connection.runAndReadAll(
+  const lastRecordedRow = db
+    .prepare(
       `
         SELECT max(observed_at_ms) AS last_recorded_at_ms
         FROM transmission_download_history
       `,
     )
+    .get() as { last_recorded_at_ms?: number | bigint | null } | undefined
 
-    const points = pointsReader
-      .getRowObjectsJS()
-      .map((row) => normalizeHistoryRow(row))
-      .filter((row): row is DownloadHistoryPoint => row !== null)
-
-    const [lastRecordedRow] = lastRecordedReader.getRowObjectsJS()
-    const lastRecordedAtMs = lastRecordedRow
+  return {
+    points,
+    bucketMs: HISTORY_BUCKET_MS,
+    capturedEveryMs: SAMPLE_INTERVAL_MS,
+    rangeStartMs,
+    rangeEndMs,
+    lastRecordedAtMs: lastRecordedRow
       ? maybeNumber(lastRecordedRow.last_recorded_at_ms)
-      : null
-
-    return {
-      points,
-      bucketMs: HISTORY_BUCKET_MS,
-      capturedEveryMs: SAMPLE_INTERVAL_MS,
-      rangeStartMs,
-      rangeEndMs,
-      lastRecordedAtMs,
-    }
-  })
+      : null,
+  }
 }
 
 function writeJson(res: ServerResponse, payload: DownloadHistoryResponse) {
@@ -374,25 +331,72 @@ function writeJson(res: ServerResponse, payload: DownloadHistoryResponse) {
 
 function writeMethodNotAllowed(res: ServerResponse) {
   res.statusCode = 405
-  res.setHeader('allow', 'GET')
+  res.setHeader('allow', 'GET, POST')
   res.end('Method Not Allowed')
+}
+
+function writeBadRequest(res: ServerResponse, message: string) {
+  res.statusCode = 400
+  res.setHeader('cache-control', 'no-cache')
+  res.setHeader('content-type', 'application/json; charset=utf-8')
+  res.end(JSON.stringify({ error: message }))
+}
+
+async function readRequestBody(req: IncomingMessage) {
+  const chunks: Buffer[] = []
+
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 function createRouteHandler() {
   return async (req: IncomingMessage, res: ServerResponse) => {
-    if (req.method !== 'GET') {
-      writeMethodNotAllowed(res)
+    if (req.method === 'GET') {
+      try {
+        writeJson(res, await readDownloadHistory())
+      } catch (error) {
+        res.statusCode = 500
+        res.setHeader('cache-control', 'no-cache')
+        res.setHeader('content-type', 'application/json; charset=utf-8')
+        res.end(JSON.stringify({ error: getErrorMessage(error) }))
+      }
       return
     }
 
-    try {
-      writeJson(res, await readDownloadHistory())
-    } catch (error) {
-      res.statusCode = 500
-      res.setHeader('cache-control', 'no-cache')
-      res.setHeader('content-type', 'application/json; charset=utf-8')
-      res.end(JSON.stringify({ error: getErrorMessage(error) }))
+    if (req.method === 'POST') {
+      try {
+        const rawBody = await readRequestBody(req)
+        const payload = JSON.parse(rawBody) as DownloadHistoryIngestRequest
+        const downloadSpeedBps = maybeNumber(payload.downloadSpeedBps)
+        const uploadSpeedBps = maybeNumber(payload.uploadSpeedBps)
+
+        if (downloadSpeedBps === null || uploadSpeedBps === null) {
+          writeBadRequest(res, 'downloadSpeedBps and uploadSpeedBps are required.')
+          return
+        }
+
+        await writeDownloadSample(Date.now(), downloadSpeedBps, uploadSpeedBps)
+        res.statusCode = 204
+        res.end()
+        return
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          writeBadRequest(res, 'Request body must be valid JSON.')
+          return
+        }
+
+        res.statusCode = 500
+        res.setHeader('cache-control', 'no-cache')
+        res.setHeader('content-type', 'application/json; charset=utf-8')
+        res.end(JSON.stringify({ error: getErrorMessage(error) }))
+        return
+      }
     }
+
+    writeMethodNotAllowed(res)
   }
 }
 

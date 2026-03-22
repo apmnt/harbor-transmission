@@ -11,7 +11,7 @@ The app is designed around Transmission's existing web interface and RPC model. 
 - Session telemetry panel for speed limits, queue settings, ratios, and free space
 - Mullvad VPN status with public exit detection, active usage, and current exit IP/location
 - DuckDB-backed torrent catalog search over a generated Parquet dataset
-- Weekly download-speed history chart backed by 30-second server-side sampling into DuckDB
+- Weekly download-speed history chart backed by a local 30-second SQLite history store
 - One-click magnet adds from the catalog UI using Transmission's native `torrent-add` URL flow
 - Torrent cards with queue state, progress, ETA, peer details, labels, and quick start/pause controls
 - Demo fallback when the local Transmission RPC endpoint is unavailable
@@ -31,7 +31,7 @@ The app also exposes `/api/mullvad/status` during `bun run dev` and `bun run pre
 
 The torrent catalog lives at `/api/catalog/search`. It queries `data/torrents-catalog.parquet` with DuckDB. If the Parquet file is missing and `torrents-csv-data/torrents.csv` exists, the server will generate the Parquet file on the first catalog request.
 
-The app also exposes `/api/history/download-speed`. While the dev or preview server is running, Harbor samples Transmission's current session download speed every 30 seconds into `data/harbor-history.duckdb` and serves the latest week as chart data.
+The app also exposes `/api/history/download-speed`. While the dev or preview server is running, Harbor saves Transmission download-speed samples into `data/harbor-history.sqlite` and serves the latest week as chart data.
 
 `bun run dev` now starts Vite with `--host`, so it binds on your LAN and can be opened from your phone using the network URL shown in the terminal.
 
