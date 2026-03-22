@@ -285,6 +285,10 @@ export class TransmissionRpcClient {
     return this.request('torrent_stop', ids.length > 0 ? { ids } : undefined)
   }
 
+  async removeTorrents(ids: number[], deleteLocalData = false) {
+    return this.request('torrent_remove', ids.length > 0 ? { ids, delete_local_data: deleteLocalData } : undefined)
+  }
+
   async setAltSpeed(enabled: boolean) {
     return this.request('session_set', { alt_speed_enabled: enabled })
   }

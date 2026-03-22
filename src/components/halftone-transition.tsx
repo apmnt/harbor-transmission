@@ -24,7 +24,7 @@ function HalftoneTransition() {
     >
       <HalftoneDots
         className="absolute inset-0 block h-full w-full"
-        colorBack="#ffffff"
+        colorBack="#ffffff00"
         colorFront="#000000"
         contrast={0.84}
         grainMixer={0}

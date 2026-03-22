@@ -224,6 +224,21 @@ export function useTransmission() {
     [client, runAction],
   )
 
+  const removeTorrent = useCallback(
+    async (torrent: TransmissionTorrent) => {
+      await runAction(
+        `torrent-remove-${torrent.id}`,
+        () => client.removeTorrents([torrent.id]),
+        (current) => ({
+          ...current,
+          torrents: current.torrents.filter((value) => value.id !== torrent.id),
+          lastUpdated: new Date().toISOString(),
+        }),
+      )
+    },
+    [client, runAction],
+  )
+
   return {
     snapshot,
     pendingAction,
@@ -232,5 +247,6 @@ export function useTransmission() {
     startAll,
     pauseAll,
     toggleTorrent,
+    removeTorrent,
   }
 }

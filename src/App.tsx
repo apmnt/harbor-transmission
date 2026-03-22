@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  ChevronDown,
   Copy,
   FolderOpen,
   Gauge,
@@ -15,15 +16,26 @@ import {
   Search,
   ShieldCheck,
   TimerReset,
+  Trash2,
   Wifi,
+  X,
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { HalftoneTransition } from '@/components/halftone-transition'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
-import { Select } from '@/components/ui/select'
 import { useTransmission } from '@/hooks/use-transmission'
 import {
   getFilterCounts,
@@ -72,7 +84,7 @@ const sortOptions: { label: string; value: SortMode }[] = [
 ]
 
 function App() {
-  const { pauseAll, pendingAction, refresh, snapshot, startAll, toggleTorrent } =
+  const { pauseAll, pendingAction, refresh, removeTorrent, snapshot, startAll, toggleTorrent } =
     useTransmission()
   const [filter, setFilter] = useState<TorrentFilter>('all')
   const [sortMode, setSortMode] = useState<SortMode>('queue')
@@ -139,6 +151,7 @@ function App() {
         onFilterChange={setFilter}
         onQueryChange={setQuery}
         onRefresh={refresh}
+        onRemoveTorrent={removeTorrent}
         onSortChange={setSortMode}
         onToggleTorrent={toggleTorrent}
         pendingAction={pendingAction}
@@ -309,6 +322,7 @@ function QueueSection({
   onFilterChange,
   onQueryChange,
   onRefresh,
+  onRemoveTorrent,
   onSortChange,
   onToggleTorrent,
   pendingAction,
@@ -326,6 +340,7 @@ function QueueSection({
   onFilterChange: (value: TorrentFilter) => void
   onQueryChange: (value: string) => void
   onRefresh: () => void
+  onRemoveTorrent: (torrent: TransmissionTorrent) => void
   onSortChange: (value: SortMode) => void
   onToggleTorrent: (torrent: TransmissionTorrent) => void
   pendingAction: string | null
@@ -359,30 +374,38 @@ function QueueSection({
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               aria-label="Search torrents"
-              className="h-10 rounded-none border-x-0 border-t-0 border-b border-border bg-transparent px-0 pl-9 shadow-none focus-visible:ring-0"
+              className="h-10 rounded-none border-x-0 border-t-0 border-b border-border bg-transparent px-0 pl-9 pr-9 shadow-none focus-visible:ring-0"
               placeholder="Search torrents, labels, or tracker host"
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
             />
+            {query ? (
+              <button
+                aria-label="Clear search"
+                className="absolute right-0 top-1/2 inline-flex h-10 w-9 -translate-y-1/2 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => onQueryChange('')}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            ) : null}
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Select
-              ariaLabel="Filter torrents"
-              options={filters.map((item) => ({
+            <OptionMenu
+              items={filters.map((item) => ({
                 label: `${item.label} (${counts[item.value]})`,
                 value: item.value,
               }))}
-              selectClassName="rounded-none border-x-0 border-t-0 border-b border-border bg-transparent px-0 pr-8 focus:border-foreground"
+              label="Filter"
               value={filter}
               onValueChange={(value) => onFilterChange(value as TorrentFilter)}
             />
-            <Select
-              ariaLabel="Sort torrents"
-              options={sortOptions.map((item) => ({
-                label: `Sort: ${item.label}`,
+            <OptionMenu
+              items={sortOptions.map((item) => ({
+                label: item.label,
                 value: item.value,
               }))}
-              selectClassName="rounded-none border-x-0 border-t-0 border-b border-border bg-transparent px-0 pr-8 focus:border-foreground"
+              label="Sort"
               value={sortMode}
               onValueChange={(value) => onSortChange(value as SortMode)}
             />
@@ -404,13 +427,20 @@ function QueueSection({
                 key={torrent.id}
                 copied={copiedTorrentId === torrent.id}
                 expanded={expandedTorrentId === torrent.id}
-                isBusy={pendingAction === `torrent-${torrent.id}`}
+                isBusy={
+                  pendingAction === `torrent-${torrent.id}` ||
+                  pendingAction === `torrent-remove-${torrent.id}`
+                }
                 onCopyMagnet={async () => {
                   if (!torrent.magnet_link || !navigator.clipboard?.writeText) return
                   await navigator.clipboard.writeText(torrent.magnet_link)
                   onCopyMagnet(torrent.id)
                 }}
                 onExpand={() => onExpand((current) => (current === torrent.id ? null : torrent.id))}
+                onRemove={() => {
+                  if (expandedTorrentId === torrent.id) onExpand(null)
+                  onRemoveTorrent(torrent)
+                }}
                 onToggle={() => onToggleTorrent(torrent)}
                 torrent={torrent}
               />
@@ -527,6 +557,47 @@ function SessionSection({
   )
 }
 
+function OptionMenu({
+  items,
+  label,
+  onValueChange,
+  value,
+}: {
+  items: { label: string; value: string }[]
+  label: string
+  onValueChange: (value: string) => void
+  value: string
+}) {
+  const activeItem = items.find((item) => item.value === value)
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          className="h-10 justify-between rounded-none border-x-0 border-t-0 border-b border-border bg-transparent px-0 text-sm font-normal text-foreground shadow-none hover:bg-transparent hover:text-foreground"
+          variant="ghost"
+        >
+          <span className="truncate">
+            {label}: {activeItem?.label ?? value}
+          </span>
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[12rem] rounded-none">
+        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
+          {items.map((item) => (
+            <DropdownMenuRadioItem key={item.value} className="rounded-none" value={item.value}>
+              {item.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function SessionMetric({
   bottom = false,
   icon: Icon,
@@ -587,6 +658,7 @@ function TorrentRow({
   isBusy,
   onCopyMagnet,
   onExpand,
+  onRemove,
   onToggle,
   torrent,
 }: {
@@ -595,13 +667,21 @@ function TorrentRow({
   isBusy: boolean
   onCopyMagnet: () => Promise<void>
   onExpand: () => void
+  onRemove: () => void
   onToggle: () => void
   torrent: TransmissionTorrent
 }) {
+  const progressPercent = Math.round(getTorrentProgressPercent(torrent))
+
   return (
     <article className="w-full border-b border-border last:border-b-0">
       <div className="w-full min-w-0 py-3">
-        <div className="min-w-0 space-y-2">
+        <button
+          aria-expanded={expanded}
+          className="block w-full min-w-0 space-y-2 text-left"
+          onClick={onExpand}
+          type="button"
+        >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -618,46 +698,56 @@ function TorrentRow({
                 ) : null}
               </div>
             </div>
-            <button
-              className="shrink-0 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground"
-              onClick={onExpand}
-              type="button"
-            >
-              {expanded ? 'Hide details' : 'Show details'}
-            </button>
+            <span className="shrink-0 pt-0.5 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors group-hover:text-foreground">
+              {expanded ? 'Hide details' : 'See details'}
+            </span>
           </div>
 
           <h3 className="break-words font-display text-base leading-tight tracking-[-0.04em] text-foreground sm:text-lg">
             {torrent.name}
           </h3>
 
-          <Progress value={getTorrentProgressPercent(torrent)} className="h-1.5 rounded-none" />
-
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span>{Math.round(getTorrentProgressPercent(torrent))}% complete</span>
-            <span>{compactEtaLabel(torrent)}</span>
-            <span>{compactProgressLabel(torrent)}</span>
-            <span>{compactFlowLabel(torrent)}</span>
-            <span>{torrent.file_count} files</span>
-            <span>{torrent.labels.length > 0 ? torrent.labels.join(', ') : 'No labels'}</span>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex min-h-16 items-center gap-3">
             <Button
               aria-label={isPaused(torrent) ? 'Start torrent' : 'Pause torrent'}
-              className="h-9 rounded-none px-3"
+              className="h-16 w-16 shrink-0 rounded-none px-0 text-[11px] uppercase tracking-[0.14em]"
               size="sm"
               variant={isPaused(torrent) ? 'default' : 'outline'}
               disabled={isBusy}
-              onClick={onToggle}
+              onClick={(event) => {
+                event.stopPropagation()
+                onToggle()
+              }}
             >
-              {isPaused(torrent) ? <Play className="size-4" /> : <Pause className="size-4" />}
-              {isPaused(torrent) ? 'Start transfer' : 'Pause transfer'}
+              {isPaused(torrent) ? 'Start' : 'Pause'}
             </Button>
+
+            <div className="min-w-0 flex-1 space-y-2">
+              <Progress value={progressPercent} className="h-1.5 rounded-none" />
+
+              <div className="flex flex-wrap items-start gap-x-5 gap-y-1.5 text-[11px]">
+                <TorrentMeta label="Progress" value={`${progressPercent}% complete`} />
+                <TorrentMeta label="ETA" value={compactEtaLabel(torrent)} />
+                <TorrentMeta label="Transfer" value={compactFlowLabel(torrent)} />
+                <TorrentMeta label="Size" value={compactProgressLabel(torrent)} />
+              </div>
+            </div>
           </div>
-        </div>
+
+          {torrent.labels.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {torrent.labels.map((label) => (
+                <Badge
+                  key={label}
+                  variant="outline"
+                  className="rounded-none border-border/80 px-1.5 py-0 text-[10px] normal-case tracking-normal text-muted-foreground"
+                >
+                  {label}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+        </button>
 
         <div
           className={cn(
@@ -679,7 +769,7 @@ function TorrentRow({
                 <p className="break-words text-muted-foreground">{getTorrentPeerLabel(torrent)}</p>
               </div>
 
-              <div className="flex flex-wrap gap-2 border-b border-border py-3">
+              <div className="flex flex-wrap gap-2 border-b border-border py-2.5">
                 {torrent.labels.length > 0 ? (
                   torrent.labels.map((label) => (
                     <Badge key={label} variant="outline" className="rounded-none normal-case tracking-normal">
@@ -691,16 +781,54 @@ function TorrentRow({
                 )}
               </div>
 
-              <div className="flex flex-wrap gap-2 border-b border-border py-3">
+              <div className="flex flex-wrap gap-4 border-b border-border py-2.5">
                 {torrent.magnet_link ? (
-                  <Button className="h-9 rounded-none px-3" size="sm" variant="outline" onClick={onCopyMagnet}>
+                  <Button
+                    className="h-auto rounded-none px-0 py-0 text-[11px] font-medium uppercase tracking-[0.16em]"
+                    size="sm"
+                    variant="ghost"
+                    onClick={onCopyMagnet}
+                  >
                     <Copy className="size-4" />
                     {copied ? 'Copied magnet' : 'Copy magnet'}
                   </Button>
                 ) : null}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      className="h-auto rounded-none px-0 py-0 text-[11px] font-medium uppercase tracking-[0.16em]"
+                      size="sm"
+                      variant="ghost"
+                    >
+                      Actions
+                      <ChevronDown className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="rounded-none">
+                    <DropdownMenuLabel>Torrent</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="rounded-none"
+                      disabled={isBusy}
+                      onClick={onCopyMagnet}
+                    >
+                      <Copy className="size-4" />
+                      {copied ? 'Copied magnet' : 'Copy magnet'}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="rounded-none"
+                      disabled={isBusy}
+                      onClick={onRemove}
+                      variant="destructive"
+                    >
+                      <Trash2 className="size-4" />
+                      Remove torrent
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
-              <div className="space-y-2 py-3 text-sm">
+              <div className="space-y-2 py-2.5 text-sm">
                 <InlineDetail label="Trackers" value={getTrackerHosts(torrent).join(', ') || 'Unavailable'} />
                 <InlineDetail label="Download path" value={torrent.download_dir} breakAll />
                 <InlineDetail label="Privacy" value={torrent.is_private ? 'Private torrent' : 'Public torrent'} />
@@ -718,6 +846,21 @@ function TorrentRow({
   )
 }
 
+function TorrentMeta({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="min-w-0 text-left">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+      <p className="mt-0.5 break-words text-[11px] leading-snug text-foreground/88">{value}</p>
+    </div>
+  )
+}
+
 function DetailStrip({
   label,
   value,
@@ -726,7 +869,7 @@ function DetailStrip({
   value: string
 }) {
   return (
-    <div className="bg-background px-3 py-2.5">
+    <div className="bg-background px-3 py-2">
       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
       <p className="mt-1 break-words font-display text-sm tracking-[-0.04em] text-foreground sm:text-base">{value}</p>
     </div>
@@ -745,11 +888,11 @@ function InlineDetail({
   value: string
 }) {
   return (
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
+    <div className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-start gap-3">
+      <span className="text-muted-foreground">{label}</span>
       <span
         className={cn(
-          'text-foreground sm:max-w-[70%] sm:text-right',
+          'min-w-0 text-foreground',
           breakAll ? 'break-all' : 'break-words',
           mono && 'font-mono text-xs',
         )}
