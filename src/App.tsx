@@ -509,9 +509,7 @@ function CatalogResultRow({
           disabled={isBusy}
           onClick={() => void onAdd()}
         >
-          <HardDriveDownload
-            className={cn("size-4", isBusy && "animate-pulse")}
-          />
+          {!isBusy ? <HardDriveDownload className="size-4" /> : null}
           {isBusy ? "Adding" : "Add"}
         </Button>
 

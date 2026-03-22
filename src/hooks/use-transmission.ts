@@ -9,7 +9,6 @@ import {
   type MullvadStatus,
 } from '@/lib/mullvad'
 import {
-  getAddedTorrentInfo,
   getDuplicateTorrentInfo,
   getTorrentStateLabel,
   isFinished,
@@ -410,14 +409,13 @@ export function useTransmission() {
             const duplicate = getDuplicateTorrentInfo(response)
             if (duplicate) {
               toast('Torrent already in Transmission', {
-                description: duplicate.name,
+                description: torrent.name,
               })
               return
             }
 
-            const added = getAddedTorrentInfo(response)
             toast.success('Torrent added', {
-              description: added?.name ?? torrent.name,
+              description: torrent.name,
             })
           },
         },
