@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { demoSnapshot } from '@/lib/demo-data'
 import {
+  MullvadStatusClient,
+  unavailableMullvadStatus,
+  type MullvadStatus,
+} from '@/lib/mullvad'
+import {
   getTorrentStateLabel,
   isFinished,
   isPaused,
@@ -16,6 +21,13 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to reach Transmission RPC.'
 }
 
+function getUnavailableMullvadSnapshot(error: unknown): MullvadStatus {
+  return {
+    ...unavailableMullvadStatus,
+    error: error instanceof Error ? error.message : unavailableMullvadStatus.error,
+  }
+}
+
 function updateDemoTorrent(
   torrent: TransmissionTorrent,
   updater: (torrent: TransmissionTorrent) => TransmissionTorrent,
@@ -23,8 +35,32 @@ function updateDemoTorrent(
   return updater({ ...torrent })
 }
 
+async function getTransmissionSnapshot(client: TransmissionRpcClient) {
+  const [session, stats, torrentsResponse] = await Promise.all([
+    client.getSession(),
+    client.getSessionStats(),
+    client.getTorrents(),
+  ])
+
+  let freeSpace: number | null = null
+  try {
+    const freeSpaceResponse = await client.getFreeSpace(session.download_dir)
+    freeSpace = freeSpaceResponse.size_bytes
+  } catch {
+    // Keep the previous free-space reading if the daemon skips this response.
+  }
+
+  return {
+    session,
+    stats,
+    torrents: parseTorrentTable(torrentsResponse.torrents),
+    freeSpace,
+  }
+}
+
 export function useTransmission() {
   const client = useMemo(() => new TransmissionRpcClient(), [])
+  const mullvadClient = useMemo(() => new MullvadStatusClient(), [])
   const [snapshot, setSnapshot] = useState<TransmissionSnapshot>({
     ...demoSnapshot,
     isLoading: true,
@@ -37,54 +73,54 @@ export function useTransmission() {
         setSnapshot((current) => ({ ...current, isLoading: true }))
       }
 
-      try {
-        const [session, stats, torrentsResponse] = await Promise.all([
-          client.getSession(),
-          client.getSessionStats(),
-          client.getTorrents(),
-        ])
+      const [transmissionResult, mullvadResult] = await Promise.allSettled([
+        getTransmissionSnapshot(client),
+        mullvadClient.getStatus(),
+      ])
 
-        let freeSpace: number | null = null
-        try {
-          const freeSpaceResponse = await client.getFreeSpace(session.download_dir)
-          freeSpace = freeSpaceResponse.size_bytes
-        } catch {
-          // Keep the previous free-space reading if the daemon skips this response.
-        }
+      const nextMullvad =
+        mullvadResult.status === 'fulfilled'
+          ? mullvadResult.value
+          : getUnavailableMullvadSnapshot(mullvadResult.reason)
 
+      if (transmissionResult.status === 'fulfilled') {
         setSnapshot((current) => ({
           mode: 'live',
-          session,
-          stats,
-          torrents: parseTorrentTable(torrentsResponse.torrents),
-          freeSpace: freeSpace ?? current.freeSpace,
+          session: transmissionResult.value.session,
+          stats: transmissionResult.value.stats,
+          torrents: transmissionResult.value.torrents,
+          freeSpace: transmissionResult.value.freeSpace ?? current.freeSpace,
+          mullvad: nextMullvad,
           error: null,
           isLoading: false,
           lastUpdated: new Date().toISOString(),
           hasLiveData: true,
         }))
-      } catch (error) {
-        const message = getErrorMessage(error)
-        setSnapshot((current) => {
-          if (current.hasLiveData) {
-            return {
-              ...current,
-              error: message,
-              isLoading: false,
-              lastUpdated: current.lastUpdated ?? new Date().toISOString(),
-            }
-          }
+        return
+      }
 
+      const message = getErrorMessage(transmissionResult.reason)
+      setSnapshot((current) => {
+        if (current.hasLiveData) {
           return {
-            ...demoSnapshot,
+            ...current,
+            mullvad: nextMullvad,
             error: message,
             isLoading: false,
-            lastUpdated: new Date().toISOString(),
+            lastUpdated: current.lastUpdated ?? new Date().toISOString(),
           }
-        })
-      }
+        }
+
+        return {
+          ...demoSnapshot,
+          mullvad: nextMullvad,
+          error: message,
+          isLoading: false,
+          lastUpdated: new Date().toISOString(),
+        }
+      })
     },
-    [client],
+    [client, mullvadClient],
   )
 
   useEffect(() => {

@@ -5,6 +5,7 @@ import {
   formatRatio,
   formatSpeedBps,
 } from '@/lib/formatters'
+import type { MullvadStatus } from '@/lib/mullvad'
 
 export const TRANSMISSION_STATUS = {
   stopped: 0,
@@ -134,6 +135,7 @@ export interface TransmissionSnapshot {
   stats: TransmissionSessionStats
   torrents: TransmissionTorrent[]
   freeSpace: number
+  mullvad: MullvadStatus
   error: string | null
   isLoading: boolean
   lastUpdated: string | null

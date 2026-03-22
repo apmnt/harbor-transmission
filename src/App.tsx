@@ -38,6 +38,15 @@ import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { useTransmission } from '@/hooks/use-transmission'
 import {
+  getMullvadLocationLabel,
+  getMullvadServerLabel,
+  getMullvadStateLabel,
+  getMullvadStatusTone,
+  getMullvadSummary,
+  getMullvadUsageLabel,
+  type MullvadStatus,
+} from '@/lib/mullvad'
+import {
   getFilterCounts,
   getTorrentEtaLabel,
   getTorrentPeerLabel,
@@ -133,6 +142,7 @@ function App() {
         freeSpace={snapshot.freeSpace}
         isLoading={snapshot.isLoading}
         lastUpdated={snapshot.lastUpdated}
+        mullvad={snapshot.mullvad}
         onPauseAll={pauseAll}
         onRefresh={refresh}
         onStartAll={startAll}
@@ -164,6 +174,7 @@ function App() {
       <SessionSection
         currentRatio={currentRatio}
         freeSpace={snapshot.freeSpace}
+        mullvad={snapshot.mullvad}
         session={snapshot.session}
         stats={snapshot.stats}
         totalRatio={totalRatio}
@@ -178,6 +189,7 @@ function HeroBand({
   freeSpace,
   isLoading,
   lastUpdated,
+  mullvad,
   onPauseAll,
   onRefresh,
   onStartAll,
@@ -190,6 +202,7 @@ function HeroBand({
   freeSpace: number
   isLoading: boolean
   lastUpdated: string | null
+  mullvad: MullvadStatus
   onPauseAll: () => void
   onRefresh: () => void
   onStartAll: () => void
@@ -216,6 +229,7 @@ function HeroBand({
                 >
                   macOS + Transmission {version}
                 </Badge>
+                <MullvadHeroStatus status={mullvad} />
                 {lastUpdated ? (
                   <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-white/46">
                     Updated {new Date(lastUpdated).toLocaleTimeString()}
@@ -279,6 +293,45 @@ function HeroBand({
       </div>
       <HalftoneTransition />
     </header>
+  )
+}
+
+function MullvadHeroStatus({ status }: { status: MullvadStatus }) {
+  const tone = getMullvadStatusTone(status)
+  const server = getMullvadServerLabel(status)
+  const location = getMullvadLocationLabel(status)
+
+  return (
+    <>
+      <Badge
+        variant="outline"
+        className={cn(
+          'rounded-none',
+          tone === 'default' && 'border-emerald-300/24 bg-emerald-400/18 text-emerald-50',
+          tone === 'secondary' && 'border-amber-300/24 bg-amber-400/14 text-amber-50',
+          tone === 'outline' && 'border-white/20 bg-transparent text-white/78',
+          tone === 'destructive' && 'border-rose-300/24 bg-rose-400/16 text-rose-50',
+        )}
+      >
+        {getMullvadStateLabel(status)}
+      </Badge>
+      {status.available ? (
+        <Badge
+          variant="outline"
+          className="rounded-none border-white/20 bg-transparent text-white/78"
+        >
+          {getMullvadUsageLabel(status)}
+        </Badge>
+      ) : null}
+      {server || location ? (
+        <Badge
+          variant="outline"
+          className="rounded-none border-white/20 bg-transparent font-mono text-[10px] normal-case tracking-[0.04em] text-white/72"
+        >
+          {server ?? location}
+        </Badge>
+      ) : null}
+    </>
   )
 }
 
@@ -455,12 +508,14 @@ function QueueSection({
 function SessionSection({
   currentRatio,
   freeSpace,
+  mullvad,
   session,
   stats,
   totalRatio,
 }: {
   currentRatio: number
   freeSpace: number
+  mullvad: MullvadStatus
   session: {
     dht_enabled?: boolean
     download_dir: string
@@ -540,6 +595,7 @@ function SessionSection({
             value={`${session.dht_enabled ? 'DHT' : 'DHT off'} · ${session.utp_enabled ? 'uTP' : 'uTP off'} · Ratio goal ${session.seed_ratio_limited ? formatRatio(session.seed_ratio_limit) : 'Unlimited'}`}
             icon={ShieldCheck}
           />
+          <SessionRow label="Mullvad" value={getMullvadSummary(mullvad)} icon={ShieldCheck} />
           <SessionRow
             label="Current session"
             value={`${formatBytes(stats.current_stats.downloaded_bytes)} down · ${formatBytes(stats.current_stats.uploaded_bytes)} up · ${formatDuration(stats.current_stats.seconds_active)}`}

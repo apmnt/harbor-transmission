@@ -4,6 +4,7 @@ import type {
   TransmissionSnapshot,
   TransmissionTorrent,
 } from '@/lib/transmission'
+import type { MullvadStatus } from '@/lib/mullvad'
 import { TRANSMISSION_STATUS } from '@/lib/transmission'
 
 export const demoSession: TransmissionSession = {
@@ -53,6 +54,24 @@ export const demoStats: TransmissionSessionStats = {
     session_count: 311,
     uploaded_bytes: 13_920_000_000_000,
   },
+}
+
+export const demoMullvadStatus: MullvadStatus = {
+  available: true,
+  state: 'connected',
+  usingMullvad: true,
+  lockedDown: true,
+  location: {
+    ipv4: '185.213.154.68',
+    ipv6: null,
+    country: 'Sweden',
+    city: 'Stockholm',
+    hostname: 'se-sto-wg-402',
+    bridgeHostname: null,
+    entryHostname: 'fi-hel-wg-112',
+    obfuscatorHostname: null,
+  },
+  error: null,
 }
 
 export const demoTorrents: TransmissionTorrent[] = [
@@ -297,6 +316,7 @@ export const demoSnapshot: TransmissionSnapshot = {
   stats: demoStats,
   torrents: demoTorrents,
   freeSpace: 1_760_000_000_000,
+  mullvad: demoMullvadStatus,
   error: null,
   isLoading: false,
   lastUpdated: new Date().toISOString(),
