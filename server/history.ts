@@ -1,6 +1,8 @@
 import { Buffer } from 'node:buffer'
 import { mkdir } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { Plugin } from 'vite'
@@ -13,14 +15,30 @@ const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const HISTORY_BUCKET_MS = 5 * 60 * 1000
 const JSON_RPC_VERSION = '2.0'
 const SESSION_HEADER = 'X-Transmission-Session-Id'
-const outputDir = fileURLToPath(new URL('../data', import.meta.url))
-const historyDatabasePath =
-  process.env.HARBOR_HISTORY_DATABASE_PATH ||
-  fileURLToPath(new URL('../data/harbor-history.sqlite', import.meta.url))
+const fallbackHistoryDatabasePath = fileURLToPath(new URL('../data/harbor-history.sqlite', import.meta.url))
 
+function getDefaultHistoryDatabasePath() {
+  if (process.platform === 'darwin') {
+    return join(
+      homedir(),
+      'Library',
+      'Application Support',
+      'harbor-transmission',
+      'harbor-history.sqlite',
+    )
+  }
+
+  const xdgStateHome = process.env.XDG_STATE_HOME || process.env.XDG_DATA_HOME
+  if (xdgStateHome) {
+    return join(xdgStateHome, 'harbor-transmission', 'harbor-history.sqlite')
+  }
+
+  return fallbackHistoryDatabasePath
+}
+
+const historyDatabasePath = process.env.HARBOR_HISTORY_DATABASE_PATH || getDefaultHistoryDatabasePath()
+const historyDatabaseDir = dirname(historyDatabasePath)
 const schemaSql = `
-  PRAGMA journal_mode = WAL;
-
   CREATE TABLE IF NOT EXISTS transmission_download_history (
     observed_at_ms INTEGER NOT NULL,
     download_speed_bps INTEGER NOT NULL,
@@ -98,6 +116,9 @@ function maybeNumber(value: unknown) {
 async function getHistoryDatabase() {
   if (!historyDatabase) {
     historyDatabase = await openSqliteDatabase(historyDatabasePath)
+    historyDatabase.exec('PRAGMA busy_timeout = 5000;')
+    historyDatabase.exec('PRAGMA journal_mode = DELETE;')
+    historyDatabase.exec('PRAGMA synchronous = NORMAL;')
     historyDatabase.exec(schemaSql)
   }
 
@@ -107,7 +128,7 @@ async function getHistoryDatabase() {
 async function ensureHistoryDatabase() {
   if (!historyReadyPromise) {
     historyReadyPromise = (async () => {
-      await mkdir(outputDir, { recursive: true })
+      await mkdir(historyDatabaseDir, { recursive: true })
       await getHistoryDatabase()
     })()
   }
