@@ -11,7 +11,7 @@ The app is designed around Transmission's existing web interface and RPC model. 
 - Session telemetry panel for speed limits, queue settings, ratios, and free space
 - Mullvad VPN status with public exit detection, active usage, and current exit IP/location
 - DuckDB-backed torrent catalog search over a generated Parquet dataset
-- One-click `.torrent` adds from the catalog UI using Transmission's native `torrent-add` URL flow
+- One-click magnet adds from the catalog UI using Transmission's native `torrent-add` URL flow
 - Torrent cards with queue state, progress, ETA, peer details, labels, and quick start/pause controls
 - Demo fallback when the local Transmission RPC endpoint is unavailable
 - Vite dev middleware for a local Transmission daemon, DuckDB catalog search, and Mullvad public-status checks on macOS

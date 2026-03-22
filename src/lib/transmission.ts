@@ -39,6 +39,19 @@ export interface TransmissionTracker {
   announce: string
 }
 
+export interface TransmissionTorrentInfo {
+  id: number
+  name: string
+  hash_string: string
+}
+
+export interface TransmissionTorrentAddResponse {
+  torrent_added?: TransmissionTorrentInfo
+  torrent_duplicate?: TransmissionTorrentInfo
+  'torrent-added'?: TransmissionTorrentInfo
+  'torrent-duplicate'?: TransmissionTorrentInfo
+}
+
 export interface TransmissionTorrent {
   id: number
   name: string
@@ -298,7 +311,7 @@ export class TransmissionRpcClient {
       paused?: boolean
     } = {},
   ) {
-    return this.request('torrent_add', {
+    return this.request<TransmissionTorrentAddResponse>('torrent_add', {
       filename: url,
       paused: options.paused,
       ...(options.downloadDir ? { download_dir: options.downloadDir } : {}),
@@ -321,6 +334,14 @@ export function parseTorrentTable(table: unknown[][]): TransmissionTorrent[] {
     const entries = keys.map((key, index) => [key, row[index]])
     return Object.fromEntries(entries) as TransmissionTorrent
   })
+}
+
+export function getAddedTorrentInfo(response?: TransmissionTorrentAddResponse) {
+  return response?.torrent_added ?? response?.['torrent-added'] ?? null
+}
+
+export function getDuplicateTorrentInfo(response?: TransmissionTorrentAddResponse) {
+  return response?.torrent_duplicate ?? response?.['torrent-duplicate'] ?? null
 }
 
 export function isDownloading(torrent: TransmissionTorrent) {
@@ -355,6 +376,10 @@ export function needsMetadata(torrent: TransmissionTorrent) {
 }
 
 export function getTorrentStateLabel(torrent: TransmissionTorrent) {
+  if (needsMetadata(torrent)) {
+    return isPaused(torrent) ? 'Needs metadata' : 'Retrieving metadata'
+  }
+
   switch (torrent.status) {
     case TRANSMISSION_STATUS.stopped:
       return torrent.is_finished ? 'Seeding complete' : 'Paused'
@@ -439,6 +464,23 @@ export function getTorrentPeerLabel(torrent: TransmissionTorrent) {
     return error
   }
 
+  if (needsMetadata(torrent)) {
+    const peers = torrent.peers_connected
+    const webSeeds = torrent.webseeds_sending_to_us
+    const sources: string[] = []
+
+    if (peers > 0) {
+      sources.push(`${torrent.peers_sending_to_us}/${peers} peers`)
+    }
+    if (webSeeds > 0) {
+      sources.push(`${webSeeds} web seeds`)
+    }
+
+    return `${sources.length > 0 ? `Retrieving metadata from ${sources.join(' + ')}` : 'Waiting for metadata peers'} · Down ${formatSpeedBps(
+      torrent.rate_download,
+    )} · Up ${formatSpeedBps(torrent.rate_upload)}`
+  }
+
   if (isDownloading(torrent)) {
     const peers = torrent.peers_connected
     const webSeeds = torrent.webseeds_sending_to_us
@@ -471,6 +513,7 @@ export function getTorrentPeerLabel(torrent: TransmissionTorrent) {
 
 export function getTorrentStatusTone(torrent: TransmissionTorrent) {
   if (torrent.error > 0) return 'destructive' as const
+  if (needsMetadata(torrent)) return 'secondary' as const
   if (isDownloading(torrent) || isSeeding(torrent)) return 'default' as const
   if (isQueued(torrent) || isChecking(torrent)) return 'secondary' as const
   return 'outline' as const

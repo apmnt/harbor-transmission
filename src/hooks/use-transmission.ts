@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 
 import { getTorrentMagnetLink, type CatalogTorrent } from '@/lib/catalog'
 import { demoSnapshot } from '@/lib/demo-data'
@@ -8,6 +9,8 @@ import {
   type MullvadStatus,
 } from '@/lib/mullvad'
 import {
+  getAddedTorrentInfo,
+  getDuplicateTorrentInfo,
   getTorrentStateLabel,
   isFinished,
   isPaused,
@@ -124,6 +127,7 @@ export function useTransmission() {
     isLoading: true,
   })
   const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const refreshIntervalMs = snapshot.mode === 'live' && snapshot.error === null ? 1000 : 5000
 
   const refresh = useCallback(
     async (silent = false) => {
@@ -182,45 +186,71 @@ export function useTransmission() {
   )
 
   useEffect(() => {
-    void refresh()
-    const interval = window.setInterval(() => {
-      void refresh(true)
-    }, 5000)
+    let cancelled = false
+    let timeoutId: number | undefined
 
-    return () => window.clearInterval(interval)
-  }, [refresh])
+    const scheduleRefresh = async (silent: boolean) => {
+      await refresh(silent)
+
+      if (cancelled) return
+
+      timeoutId = window.setTimeout(() => {
+        void scheduleRefresh(true)
+      }, refreshIntervalMs)
+    }
+
+    void scheduleRefresh(false)
+
+    return () => {
+      cancelled = true
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId)
+      }
+    }
+  }, [refresh, refreshIntervalMs])
 
   const mutateDemo = useCallback(
-    (label: string, updater: (current: TransmissionSnapshot) => TransmissionSnapshot) => {
+    (
+      label: string,
+      updater: (current: TransmissionSnapshot) => TransmissionSnapshot,
+      onSuccess?: () => void,
+    ) => {
       setPendingAction(label)
       window.setTimeout(() => {
         setSnapshot((current) => updater(current))
         setPendingAction(null)
+        onSuccess?.()
       }, 160)
     },
     [],
   )
 
   const runAction = useCallback(
-    async (
+    async <T,>(
       label: string,
-      liveAction: () => Promise<unknown>,
+      liveAction: () => Promise<T>,
       demoAction: (current: TransmissionSnapshot) => TransmissionSnapshot,
+      options: {
+        onSuccess?: (result: T | undefined) => void
+      } = {},
     ) => {
       if (snapshot.mode === 'demo') {
-        mutateDemo(label, demoAction)
-        return
+        mutateDemo(label, demoAction, () => options.onSuccess?.(undefined))
+        return undefined
       }
 
       try {
         setPendingAction(label)
-        await liveAction()
+        const result = await liveAction()
         await refresh(true)
+        options.onSuccess?.(result)
+        return result
       } catch (error) {
         setSnapshot((current) => ({
           ...current,
           error: getErrorMessage(error),
         }))
+        return undefined
       } finally {
         setPendingAction(null)
       }
@@ -328,6 +358,13 @@ export function useTransmission() {
           torrents: current.torrents.filter((value) => value.id !== torrent.id),
           lastUpdated: new Date().toISOString(),
         }),
+        {
+          onSuccess: () => {
+            toast.success('Torrent removed', {
+              description: torrent.name,
+            })
+          },
+        },
       )
     },
     [client, runAction],
@@ -367,6 +404,22 @@ export function useTransmission() {
             torrents: [...current.torrents, createDemoCatalogTorrent(torrent, current)],
             lastUpdated: new Date().toISOString(),
           }
+        },
+        {
+          onSuccess: (response) => {
+            const duplicate = getDuplicateTorrentInfo(response)
+            if (duplicate) {
+              toast('Torrent already in Transmission', {
+                description: duplicate.name,
+              })
+              return
+            }
+
+            const added = getAddedTorrentInfo(response)
+            toast.success('Torrent added', {
+              description: added?.name ?? torrent.name,
+            })
+          },
         },
       )
     },
