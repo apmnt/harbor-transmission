@@ -14,6 +14,12 @@ export interface DownloadHistoryResponse {
   lastRecordedAtMs: number | null
 }
 
+interface LiveDownloadHistoryOptions {
+  isLive: boolean
+  liveDownloadSpeedBps: number
+  nowMs: number
+}
+
 export const DOWNLOAD_HISTORY_UPDATED_EVENT = 'harbor:download-history-updated'
 
 export function notifyDownloadHistoryUpdated() {
@@ -22,6 +28,28 @@ export function notifyDownloadHistoryUpdated() {
   }
 
   window.dispatchEvent(new Event(DOWNLOAD_HISTORY_UPDATED_EVENT))
+}
+
+export function getLiveDownloadHistoryResponse(
+  data: DownloadHistoryResponse | null,
+  { isLive, liveDownloadSpeedBps, nowMs }: LiveDownloadHistoryOptions,
+) {
+  if (!data || !isLive) {
+    return data
+  }
+
+  const livePoint: DownloadHistoryPoint = {
+    timestampMs: nowMs,
+    averageDownloadSpeedBps: liveDownloadSpeedBps,
+    peakDownloadSpeedBps: liveDownloadSpeedBps,
+    sampleCount: 1,
+  }
+
+  return {
+    ...data,
+    points: [...data.points, livePoint],
+    rangeEndMs: Math.max(data.rangeEndMs, nowMs),
+  }
 }
 
 export class DownloadHistoryClient {

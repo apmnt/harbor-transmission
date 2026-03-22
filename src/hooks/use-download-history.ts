@@ -3,10 +3,12 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   DOWNLOAD_HISTORY_UPDATED_EVENT,
   DownloadHistoryClient,
+  getLiveDownloadHistoryResponse,
   type DownloadHistoryResponse,
 } from '@/lib/download-history'
 
 const REFRESH_INTERVAL_MS = 30_000
+const LIVE_CHART_REFRESH_INTERVAL_MS = 1_000
 
 interface DownloadHistoryState {
   data: DownloadHistoryResponse | null
@@ -14,17 +16,26 @@ interface DownloadHistoryState {
   isLoading: boolean
 }
 
+interface UseDownloadHistoryOptions {
+  isLive: boolean
+  liveDownloadSpeedBps: number
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to load download history.'
 }
 
-export function useDownloadHistory() {
+export function useDownloadHistory({
+  isLive,
+  liveDownloadSpeedBps,
+}: UseDownloadHistoryOptions) {
   const client = useMemo(() => new DownloadHistoryClient(), [])
   const [state, setState] = useState<DownloadHistoryState>({
     data: null,
     error: null,
     isLoading: true,
   })
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   useEffect(() => {
     let cancelled = false
@@ -80,5 +91,34 @@ export function useDownloadHistory() {
     }
   }, [client])
 
-  return state
+  useEffect(() => {
+    setNowMs(Date.now())
+
+    if (!isLive) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now())
+    }, LIVE_CHART_REFRESH_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [isLive])
+
+  const chartData = useMemo(
+    () =>
+      getLiveDownloadHistoryResponse(state.data, {
+        isLive,
+        liveDownloadSpeedBps,
+        nowMs,
+      }),
+    [isLive, liveDownloadSpeedBps, nowMs, state.data],
+  )
+
+  return {
+    ...state,
+    chartData,
+  }
 }

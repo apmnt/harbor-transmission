@@ -125,7 +125,12 @@ function App() {
     startAll,
     toggleTorrent,
   } = useTransmission();
-  const downloadHistory = useDownloadHistory();
+  const isLiveConnection =
+    snapshot.mode === "live" && snapshot.error === null && snapshot.hasLiveData;
+  const downloadHistory = useDownloadHistory({
+    isLive: isLiveConnection,
+    liveDownloadSpeedBps: snapshot.stats.download_speed,
+  });
   const catalog = useTorrentCatalog();
   const [filter, setFilter] = useState<TorrentFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("queue");
@@ -209,6 +214,7 @@ function App() {
 
       <DownloadHistorySection
         data={downloadHistory.data}
+        chartData={downloadHistory.chartData}
         error={downloadHistory.error}
         isLoading={downloadHistory.isLoading}
       />
@@ -253,15 +259,18 @@ const downloadHistoryChartConfig = {
 } satisfies ChartConfig;
 
 function DownloadHistorySection({
+  chartData,
   data,
   error,
   isLoading,
 }: {
+  chartData: DownloadHistoryResponse | null;
   data: DownloadHistoryResponse | null;
   error: string | null;
   isLoading: boolean;
 }) {
   const points = data?.points ?? [];
+  const chartPoints = chartData?.points ?? points;
   const latestPoint = points.at(-1) ?? null;
   const averageSpeed =
     points.length > 0
@@ -287,8 +296,8 @@ function DownloadHistorySection({
           </h2>
           <p className="text-sm text-muted-foreground">
             Latest week of daemon download speed. Harbor saves a new sample
-            every 30 seconds while the server is running and charts them as
-            5-minute averages.
+            every 30 seconds on the server, then extends the latest line from
+            the live client speed every second.
           </p>
         </div>
 
@@ -342,14 +351,14 @@ function DownloadHistorySection({
                 Harbor is reading the local history database.
               </p>
             </div>
-          ) : points.length > 0 ? (
+          ) : chartPoints.length > 0 ? (
             <ChartContainer
               config={downloadHistoryChartConfig}
               className="h-72 min-h-[18rem] border-y border-border py-3"
             >
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart
-                  data={points}
+                  data={chartPoints}
                   margin={{ top: 16, right: 8, bottom: 12, left: 0 }}
                 >
                   <CartesianGrid vertical={false} />
