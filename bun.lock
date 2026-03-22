@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "tmanager",
+      "name": "transmission-harbor",
       "dependencies": {
         "@duckdb/node-api": "^1.5.0-r.1",
         "@fontsource/geist-mono": "^5.2.7",

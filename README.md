@@ -1,4 +1,4 @@
-# tmanager
+# transmission-harbor
 
 Mobile-first Transmission manager for macOS, built with React, Vite, Tailwind CSS v4, and shadcn-style UI components.
 

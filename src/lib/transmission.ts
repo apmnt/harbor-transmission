@@ -222,7 +222,7 @@ export class TransmissionRpcClient {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        id: 'tmanager',
+        id: 'transmission-harbor',
         jsonrpc: JSON_RPC_VERSION,
         method,
         params,
