@@ -265,6 +265,7 @@ const liveDownloadChartConfig = {
 } satisfies ChartConfig;
 
 const LIVE_CHART_EASING_MS = 220;
+const LIVE_CHART_WINDOW_MS = 5 * 60 * 1000;
 const DEMO_LIVE_CHART_WINDOW_MS = 5 * 60 * 1000;
 const DEMO_LIVE_CHART_STEP_MS = 1_000;
 
@@ -395,13 +396,10 @@ function useAnimatedLiveChart({
       return liveData;
     }
 
-    const chartWindowMs = Math.max(
-      liveData.rangeEndMs - liveData.rangeStartMs,
-      liveData.bucketMs,
-    );
-    const rangeEndMs = Math.max(frame.nowMs, liveData.rangeEndMs);
-    const rangeStartMs = rangeEndMs - chartWindowMs;
-    const visiblePoints = liveData.points.filter(
+    const rangeEndMs = frame.nowMs;
+    const rangeStartMs = rangeEndMs - LIVE_CHART_WINDOW_MS;
+    const stablePoints = liveData.points.length > 1 ? liveData.points.slice(0, -1) : [];
+    const visiblePoints = stablePoints.filter(
       (point) => point.timestampMs >= rangeStartMs,
     );
     const tailPoint: DownloadHistoryResponse["points"][number] = {
@@ -439,6 +437,12 @@ function DownloadHistorySection({
   const latestPoint = points.at(-1) ?? null;
   const weeklyChartDomain = getChartTimeDomain(points, data?.bucketMs ?? 60_000);
   const animatedLiveData = useAnimatedLiveChart({ isLive, liveData });
+  const liveChartRangeEndMs = animatedLiveData?.rangeEndMs ?? 0;
+  const liveChartRangeStartMs = liveChartRangeEndMs - LIVE_CHART_WINDOW_MS;
+  const liveChartTicks = useMemo(
+    () => getMinuteAxisTicks(liveChartRangeStartMs, liveChartRangeEndMs),
+    [liveChartRangeEndMs, liveChartRangeStartMs],
+  );
   const averageSpeed =
     points.length > 0
       ? points.reduce(
@@ -595,11 +599,12 @@ function DownloadHistorySection({
                   <DownloadSpeedChart
                     animated
                     config={liveDownloadChartConfig}
-                    domainEndMs={animatedLiveData.rangeEndMs}
-                    domainStartMs={animatedLiveData.rangeStartMs}
+                    domainEndMs={liveChartRangeEndMs}
+                    domainStartMs={liveChartRangeStartMs}
                     emptyMessage="Waiting for live download samples."
                     points={animatedLiveData.points}
                     tooltipLabelFormatter={formatLiveHistoryTooltipLabel}
+                    xAxisTicks={liveChartTicks}
                     yAxisDomain={liveYAxisDomain}
                     xAxisTickFormatter={formatLiveHistoryAxisLabel}
                   />
@@ -634,6 +639,7 @@ function DownloadSpeedChart({
   emptyMessage,
   points,
   tooltipLabelFormatter,
+  xAxisTicks,
   yAxisDomain,
   xAxisTickFormatter,
 }: {
@@ -644,6 +650,7 @@ function DownloadSpeedChart({
   emptyMessage: string;
   points: DownloadHistoryResponse["points"];
   tooltipLabelFormatter: (timestampMs: number) => string;
+  xAxisTicks?: number[];
   yAxisDomain?: [number, number];
   xAxisTickFormatter: (timestampMs: number) => string;
 }) {
@@ -676,6 +683,7 @@ function DownloadSpeedChart({
             scale="time"
             tickFormatter={xAxisTickFormatter}
             tickLine={false}
+            ticks={xAxisTicks}
             type="number"
           />
           <YAxis
@@ -1904,6 +1912,18 @@ function getChartTimeDomain(
   };
 }
 
+function getMinuteAxisTicks(domainStartMs: number, domainEndMs: number) {
+  const minuteMs = 60 * 1000;
+  const ticks: number[] = [];
+  const firstTickMs = Math.ceil(domainStartMs / minuteMs) * minuteMs;
+
+  for (let tickMs = firstTickMs; tickMs <= domainEndMs; tickMs += minuteMs) {
+    ticks.push(tickMs);
+  }
+
+  return ticks;
+}
+
 function formatCatalogPublishedAt(torrent: CatalogTorrent) {
   const timestamp =
     torrent.published ?? torrent.createdUnix ?? torrent.scrapedDate;
@@ -1929,7 +1949,6 @@ function formatLiveHistoryAxisLabel(timestampMs: number) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
     minute: "2-digit",
-    second: "2-digit",
   }).format(new Date(timestampMs));
 }
 
