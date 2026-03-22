@@ -308,7 +308,6 @@ function MullvadHeroStatus({ status }: { status: MullvadStatus }) {
         className={cn(
           'rounded-none',
           tone === 'default' && 'border-emerald-300/24 bg-emerald-400/18 text-emerald-50',
-          tone === 'secondary' && 'border-amber-300/24 bg-amber-400/14 text-amber-50',
           tone === 'outline' && 'border-white/20 bg-transparent text-white/78',
           tone === 'destructive' && 'border-rose-300/24 bg-rose-400/16 text-rose-50',
         )}

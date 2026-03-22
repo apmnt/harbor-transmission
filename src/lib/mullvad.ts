@@ -1,8 +1,11 @@
+export type MullvadAddressFamily = 'ipv4' | 'ipv6'
+
 export interface MullvadLocation {
   ipv4: string | null
   ipv6: string | null
   country: string | null
   city: string | null
+  organization: string | null
   hostname: string | null
   bridgeHostname: string | null
   entryHostname: string | null
@@ -13,6 +16,7 @@ export interface MullvadStatus {
   available: boolean
   state: string
   usingMullvad: boolean
+  activeAddressFamily: MullvadAddressFamily | null
   lockedDown: boolean | null
   location: MullvadLocation | null
   error: string | null
@@ -22,68 +26,50 @@ export const unavailableMullvadStatus: MullvadStatus = {
   available: false,
   state: 'unknown',
   usingMullvad: false,
+  activeAddressFamily: null,
   lockedDown: null,
   location: null,
   error: 'Unable to read Mullvad status.',
 }
 
-function toTitleCase(value: string) {
-  return value
-    .split(/[\s_-]+/)
-    .filter(Boolean)
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join(' ')
-}
-
 export function getMullvadStateLabel(status: MullvadStatus) {
   if (!status.available) return 'Mullvad unavailable'
-  if (status.state === 'disconnected' && status.lockedDown) return 'Mullvad blocked'
-  return `Mullvad ${toTitleCase(status.state)}`
+  if (status.usingMullvad) return 'Mullvad connected'
+  return 'Mullvad not detected'
 }
 
 export function getMullvadUsageLabel(status: MullvadStatus) {
   if (!status.available) return 'Status unavailable'
-  if (status.usingMullvad) return 'Using Mullvad'
-  if (status.lockedDown) return 'Traffic blocked'
+  if (status.usingMullvad) return 'Using Mullvad exit'
+  return 'Not using Mullvad'
+}
 
-  switch (status.state) {
-    case 'connecting':
-      return 'Tunnel starting'
-    case 'disconnecting':
-      return 'Tunnel closing'
-    default:
-      return 'Not on Mullvad'
-  }
+function getActiveAddressFamily(status: MullvadStatus): MullvadAddressFamily | null {
+  const location = status.location
+  if (!location) return null
+
+  if (status.activeAddressFamily === 'ipv4' && location.ipv4) return 'ipv4'
+  if (status.activeAddressFamily === 'ipv6' && location.ipv6) return 'ipv6'
+  if (location.ipv4) return 'ipv4'
+  if (location.ipv6) return 'ipv6'
+  return null
 }
 
 export function getMullvadServerLabel(status: MullvadStatus) {
   const location = status.location
-  if (!location) return null
+  if (!location || !status.usingMullvad) return null
 
-  const exitHost = location.hostname
-  const entryHost = location.entryHostname
-  const bridgeHost = location.bridgeHostname
-  const obfuscatorHost = location.obfuscatorHostname
+  const activeAddressFamily = getActiveAddressFamily(status)
+  if (!activeAddressFamily) return null
 
-  const parts: string[] = []
+  const activeIp = activeAddressFamily === 'ipv6' ? location.ipv6 : location.ipv4
+  if (!activeIp) return null
 
-  if (exitHost) {
-    parts.push(exitHost)
-  }
+  const familyLabel = activeAddressFamily === 'ipv6' ? 'IPv6 exit' : 'IPv4 exit'
 
-  if (entryHost) {
-    parts.push(`via ${entryHost}`)
-  }
-
-  if (bridgeHost) {
-    parts.push(`bridge ${bridgeHost}`)
-  }
-
-  if (obfuscatorHost) {
-    parts.push(`obfs ${obfuscatorHost}`)
-  }
-
-  return parts.length > 0 ? parts.join(' · ') : null
+  return location.organization
+    ? `${familyLabel} ${activeIp} · ${location.organization}`
+    : `${familyLabel} ${activeIp}`
 }
 
 export function getMullvadLocationLabel(status: MullvadStatus) {
@@ -97,10 +83,6 @@ export function getMullvadLocationLabel(status: MullvadStatus) {
 export function getMullvadStatusTone(status: MullvadStatus) {
   if (!status.available) return 'destructive' as const
   if (status.usingMullvad) return 'default' as const
-  if (status.state === 'connecting' || status.state === 'disconnecting') {
-    return 'secondary' as const
-  }
-
   return 'outline' as const
 }
 

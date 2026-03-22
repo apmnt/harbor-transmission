@@ -1,43 +1,56 @@
-import { execFile } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { promisify } from 'node:util'
 
 import type { Plugin } from 'vite'
 
-const execFileAsync = promisify(execFile)
 const MULLVAD_STATUS_ROUTE = '/api/mullvad/status'
 const MULLVAD_STATUS_TIMEOUT_MS = 3_000
+const MULLVAD_CHECK_IP_URL = 'https://am.i.mullvad.net/check-ip'
+const MULLVAD_HEADERS = {
+  Accept: '*/*',
+  Origin: 'https://mullvad.net',
+  Referer: 'https://mullvad.net/en/check',
+}
 
-interface RawMullvadLocation {
-  ipv4?: string | null
-  ipv6?: string | null
+type AddressFamily = 'ipv4' | 'ipv6'
+
+const MULLVAD_STATUS_URLS: Record<AddressFamily, string> = {
+  ipv4: 'https://ipv4.am.i.mullvad.net/json',
+  ipv6: 'https://ipv6.am.i.mullvad.net/json',
+}
+
+interface RawMullvadAddressStatus {
+  ip?: string | null
   country?: string | null
   city?: string | null
   mullvad_exit_ip?: boolean
-  hostname?: string | null
-  bridge_hostname?: string | null
-  entry_hostname?: string | null
-  obfuscator_hostname?: string | null
+  organization?: string | null
 }
 
-interface RawMullvadStatus {
-  state?: string
-  details?: {
-    locked_down?: boolean
-    location?: RawMullvadLocation | null
-  }
+interface RawMullvadCheckStatus {
+  mullvad_exit_ip?: boolean
+}
+
+interface NormalizedAddressStatus {
+  addressFamily: AddressFamily
+  ip: string
+  country: string | null
+  city: string | null
+  mullvadExitIp: boolean
+  organization: string | null
 }
 
 interface MullvadStatusResponse {
   available: boolean
   state: string
   usingMullvad: boolean
+  activeAddressFamily: AddressFamily | null
   lockedDown: boolean | null
   location: {
     ipv4: string | null
     ipv6: string | null
     country: string | null
     city: string | null
+    organization: string | null
     hostname: string | null
     bridgeHostname: string | null
     entryHostname: string | null
@@ -56,27 +69,49 @@ function maybeString(value: unknown) {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
-function normalizeMullvadStatus(raw: RawMullvadStatus): MullvadStatusResponse {
-  const location = raw.details?.location
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  return 'Unable to query Mullvad public status.'
+}
+
+async function requestJson<T>(url: string) {
+  const response = await fetch(url, {
+    headers: MULLVAD_HEADERS,
+    signal: AbortSignal.timeout(MULLVAD_STATUS_TIMEOUT_MS),
+  })
+
+  if (!response.ok) {
+    throw new Error(`${url} returned ${response.status}.`)
+  }
+
+  return (await response.json()) as T
+}
+
+async function readAddressStatus(addressFamily: AddressFamily): Promise<NormalizedAddressStatus> {
+  const statusPayload = await requestJson<RawMullvadAddressStatus>(MULLVAD_STATUS_URLS[addressFamily])
+  const ip = maybeString(statusPayload.ip)
+
+  if (!ip) {
+    throw new Error(`${addressFamily.toUpperCase()} lookup did not return an IP address.`)
+  }
+
+  const checkPayload = await requestJson<RawMullvadCheckStatus>(
+    `${MULLVAD_CHECK_IP_URL}/${encodeURIComponent(ip)}`,
+  )
 
   return {
-    available: true,
-    state: maybeString(raw.state) ?? 'unknown',
-    usingMullvad: Boolean(location?.mullvad_exit_ip),
-    lockedDown: typeof raw.details?.locked_down === 'boolean' ? raw.details.locked_down : null,
-    location: location
-      ? {
-          ipv4: maybeString(location.ipv4),
-          ipv6: maybeString(location.ipv6),
-          country: maybeString(location.country),
-          city: maybeString(location.city),
-          hostname: maybeString(location.hostname),
-          bridgeHostname: maybeString(location.bridge_hostname),
-          entryHostname: maybeString(location.entry_hostname),
-          obfuscatorHostname: maybeString(location.obfuscator_hostname),
-        }
-      : null,
-    error: null,
+    addressFamily,
+    ip,
+    country: maybeString(statusPayload.country),
+    city: maybeString(statusPayload.city),
+    mullvadExitIp:
+      typeof checkPayload.mullvad_exit_ip === 'boolean'
+        ? checkPayload.mullvad_exit_ip
+        : Boolean(statusPayload.mullvad_exit_ip),
+    organization: maybeString(statusPayload.organization),
   }
 }
 
@@ -85,41 +120,78 @@ function getUnavailableStatus(error: string): MullvadStatusResponse {
     available: false,
     state: 'unknown',
     usingMullvad: false,
+    activeAddressFamily: null,
     lockedDown: null,
     location: null,
     error,
   }
 }
 
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message) {
-    return error.message
+function chooseActiveAddress(
+  addresses: Partial<Record<AddressFamily, NormalizedAddressStatus>>,
+  usingMullvad: boolean,
+) {
+  if (usingMullvad) {
+    return addresses.ipv4?.mullvadExitIp
+      ? addresses.ipv4
+      : addresses.ipv6?.mullvadExitIp
+        ? addresses.ipv6
+        : null
   }
 
-  if (typeof error === 'object' && error !== null) {
-    const stderr = 'stderr' in error ? error.stderr : null
-    if (typeof stderr === 'string' && stderr.trim().length > 0) {
-      return stderr.trim()
-    }
-  }
+  return addresses.ipv4 ?? addresses.ipv6 ?? null
+}
 
-  return 'Unable to query Mullvad status.'
+function formatFailure(addressFamily: AddressFamily, error: unknown) {
+  return `${addressFamily.toUpperCase()}: ${getErrorMessage(error)}`
 }
 
 async function readMullvadStatus(): Promise<MullvadStatusResponse> {
-  const command = process.env.MULLVAD_CLI_PATH || 'mullvad'
+  const [ipv4Result, ipv6Result] = await Promise.allSettled([
+    readAddressStatus('ipv4'),
+    readAddressStatus('ipv6'),
+  ])
 
-  try {
-    const { stdout } = await execFileAsync(command, ['status', '--json'], {
-      encoding: 'utf8',
-      timeout: MULLVAD_STATUS_TIMEOUT_MS,
-      windowsHide: true,
-    })
+  const failures: string[] = []
+  const addresses: Partial<Record<AddressFamily, NormalizedAddressStatus>> = {}
 
-    const payload = JSON.parse(stdout) as RawMullvadStatus
-    return normalizeMullvadStatus(payload)
-  } catch (error) {
-    return getUnavailableStatus(getErrorMessage(error))
+  if (ipv4Result.status === 'fulfilled') {
+    addresses.ipv4 = ipv4Result.value
+  } else {
+    failures.push(formatFailure('ipv4', ipv4Result.reason))
+  }
+
+  if (ipv6Result.status === 'fulfilled') {
+    addresses.ipv6 = ipv6Result.value
+  } else {
+    failures.push(formatFailure('ipv6', ipv6Result.reason))
+  }
+
+  if (!addresses.ipv4 && !addresses.ipv6) {
+    return getUnavailableStatus(failures.join(' · ') || 'Unable to query Mullvad public status.')
+  }
+
+  const usingMullvad = Boolean(addresses.ipv4?.mullvadExitIp || addresses.ipv6?.mullvadExitIp)
+  const activeAddress = chooseActiveAddress(addresses, usingMullvad)
+
+  return {
+    available: true,
+    state: usingMullvad ? 'connected' : 'disconnected',
+    usingMullvad,
+    activeAddressFamily: activeAddress?.addressFamily ?? null,
+    lockedDown: null,
+    location: {
+      ipv4: addresses.ipv4?.ip ?? null,
+      ipv6: addresses.ipv6?.ip ?? null,
+      country: activeAddress?.country ?? null,
+      city: activeAddress?.city ?? null,
+      organization: activeAddress?.organization ?? null,
+      hostname: null,
+      bridgeHostname: null,
+      entryHostname: null,
+      obfuscatorHostname: null,
+    },
+    error: null,
   }
 }
 

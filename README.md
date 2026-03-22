@@ -9,10 +9,10 @@ The app is designed around Transmission's existing web interface and RPC model. 
 - Mobile-first queue dashboard with desktop-friendly two-column layout
 - Transmission RPC polling with `X-Transmission-Session-Id` retry handling
 - Session telemetry panel for speed limits, queue settings, ratios, and free space
-- Mullvad VPN status with tunnel state, active exit usage, and current relay/server when available
+- Mullvad VPN status with public exit detection, active usage, and current exit IP/location
 - Torrent cards with queue state, progress, ETA, peer details, labels, and quick start/pause controls
 - Demo fallback when the local Transmission RPC endpoint is unavailable
-- Vite dev middleware for a local Transmission daemon and Mullvad CLI status on macOS
+- Vite dev middleware for a local Transmission daemon and Mullvad public-status checks on macOS
 
 ## Run it
 
@@ -23,7 +23,7 @@ bun run dev
 
 By default the Vite dev server proxies `/transmission/*` to `http://127.0.0.1:9091`, which matches the usual local Transmission setup on macOS.
 
-The app also exposes `/api/mullvad/status` during `bun run dev` and `bun run preview`. That endpoint shells out to the local `mullvad status --json` CLI command, so the Mullvad desktop app or CLI needs to be installed on the same Mac.
+The app also exposes `/api/mullvad/status` during `bun run dev` and `bun run preview`. That endpoint queries Mullvad's public connection-check APIs, which works for direct Mullvad connections and Tailscale sessions using Mullvad as an exit node.
 
 `bun run dev` now starts Vite with `--host`, so it binds on your LAN and can be opened from your phone using the network URL shown in the terminal.
 
@@ -35,7 +35,6 @@ Create a `.env.local` file if your daemon is not at the default endpoint or if y
 TRANSMISSION_RPC_TARGET=http://127.0.0.1:9091
 TRANSMISSION_RPC_USERNAME=
 TRANSMISSION_RPC_PASSWORD=
-MULLVAD_CLI_PATH=mullvad
 VITE_TRANSMISSION_RPC_URL=/transmission/rpc
 VITE_MULLVAD_STATUS_URL=/api/mullvad/status
 ```
@@ -43,7 +42,6 @@ VITE_MULLVAD_STATUS_URL=/api/mullvad/status
 Notes:
 
 - `TRANSMISSION_RPC_TARGET`, `TRANSMISSION_RPC_USERNAME`, and `TRANSMISSION_RPC_PASSWORD` are used by the Vite dev proxy.
-- `MULLVAD_CLI_PATH` sets which Mullvad CLI binary the local status endpoint executes. The default is `mullvad`.
 - `VITE_TRANSMISSION_RPC_URL` is the client-side RPC URL. The default is `/transmission/rpc`.
 - `VITE_MULLVAD_STATUS_URL` is the client-side Mullvad status URL. The default is `/api/mullvad/status`.
 - For a production/static deployment, serve the built app behind a proxy that exposes Transmission RPC at the same origin, or set `VITE_TRANSMISSION_RPC_URL` to a compatible endpoint.
