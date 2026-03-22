@@ -200,12 +200,9 @@ function App() {
         activeQuery={catalog.activeQuery}
         canSearch={catalog.canSearch}
         error={catalog.error}
-        hasMore={catalog.hasMore}
         hasSearched={catalog.hasSearched}
         isLoading={catalog.isLoading}
-        isLoadingMore={catalog.isLoadingMore}
         onAddTorrent={addCatalogTorrent}
-        onLoadMore={catalog.loadMore}
         onQueryChange={catalog.setQuery}
         pendingAction={pendingAction}
         query={catalog.query}
@@ -215,6 +212,7 @@ function App() {
       <DownloadHistorySection
         data={downloadHistory.data}
         error={downloadHistory.error}
+        liveChartCeilingBps={downloadHistory.liveChartCeilingBps}
         isLoading={downloadHistory.isLoading}
         isLive={isLiveConnection}
         liveData={downloadHistory.liveData}
@@ -269,18 +267,21 @@ const liveDownloadChartConfig = {
 function DownloadHistorySection({
   data,
   error,
+  liveChartCeilingBps,
   isLoading,
   isLive,
   liveData,
 }: {
   data: DownloadHistoryResponse | null;
   error: string | null;
+  liveChartCeilingBps: number;
   isLoading: boolean;
   isLive: boolean;
   liveData: DownloadHistoryResponse | null;
 }) {
   const points = data?.points ?? [];
   const latestPoint = points.at(-1) ?? null;
+  const weeklyChartDomain = getChartTimeDomain(points, data?.bucketMs ?? 60_000);
   const averageSpeed =
     points.length > 0
       ? points.reduce(
@@ -307,6 +308,11 @@ function DownloadHistorySection({
   const lastRecordedAgeLabel = data?.lastRecordedAtMs
     ? formatHistoryAgeLabel(data.lastRecordedAtMs)
     : "No samples yet";
+
+  const liveYAxisDomain =
+    liveChartCeilingBps > 0
+      ? ([0, liveChartCeilingBps] as [number, number])
+      : undefined;
 
   return (
     <section className="w-full border-b border-border bg-background">
@@ -393,8 +399,8 @@ function DownloadHistorySection({
                   <DownloadSpeedChart
                     animated={false}
                     config={downloadHistoryChartConfig}
-                    domainEndMs={data?.rangeEndMs ?? 0}
-                    domainStartMs={data?.rangeStartMs ?? 0}
+                    domainEndMs={weeklyChartDomain.endMs}
+                    domainStartMs={weeklyChartDomain.startMs}
                     emptyMessage="No weekly samples available."
                     points={points}
                     tooltipLabelFormatter={formatHistoryTooltipLabel}
@@ -436,6 +442,7 @@ function DownloadHistorySection({
                     emptyMessage="Waiting for live download samples."
                     points={liveData.points}
                     tooltipLabelFormatter={formatLiveHistoryTooltipLabel}
+                    yAxisDomain={liveYAxisDomain}
                     xAxisTickFormatter={formatLiveHistoryAxisLabel}
                   />
                 ) : (
@@ -469,6 +476,7 @@ function DownloadSpeedChart({
   emptyMessage,
   points,
   tooltipLabelFormatter,
+  yAxisDomain,
   xAxisTickFormatter,
 }: {
   animated: boolean;
@@ -478,6 +486,7 @@ function DownloadSpeedChart({
   emptyMessage: string;
   points: DownloadHistoryResponse["points"];
   tooltipLabelFormatter: (timestampMs: number) => string;
+  yAxisDomain?: [number, number];
   xAxisTickFormatter: (timestampMs: number) => string;
 }) {
   if (points.length === 0) {
@@ -513,6 +522,7 @@ function DownloadSpeedChart({
           />
           <YAxis
             axisLine={false}
+            domain={yAxisDomain}
             tickFormatter={(value) => formatSpeedBps(Number(value))}
             tickLine={false}
             width={78}
@@ -530,15 +540,13 @@ function DownloadSpeedChart({
           />
           <Line
             activeDot={false}
-            animationDuration={animated ? 900 : 0}
-            animationEasing="linear"
             dataKey="averageDownloadSpeedBps"
             dot={false}
-            isAnimationActive={animated}
+            isAnimationActive={false}
             stroke="var(--color-averageDownloadSpeedBps)"
             strokeLinecap="round"
             strokeWidth={2}
-            type="monotone"
+            type={animated ? "linear" : "monotone"}
           />
         </LineChart>
       </ResponsiveContainer>
@@ -550,12 +558,9 @@ function CatalogSection({
   activeQuery,
   canSearch,
   error,
-  hasMore,
   hasSearched,
   isLoading,
-  isLoadingMore,
   onAddTorrent,
-  onLoadMore,
   onQueryChange,
   pendingAction,
   query,
@@ -564,12 +569,9 @@ function CatalogSection({
   activeQuery: string;
   canSearch: boolean;
   error: string | null;
-  hasMore: boolean;
   hasSearched: boolean;
   isLoading: boolean;
-  isLoadingMore: boolean;
   onAddTorrent: (torrent: CatalogTorrent) => Promise<void>;
-  onLoadMore: () => Promise<void>;
   onQueryChange: (value: string) => void;
   pendingAction: string | null;
   query: string;
@@ -665,25 +667,11 @@ function CatalogSection({
         </div>
 
         {results.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-3">
             <p className="text-sm text-muted-foreground">
               Showing {results.length} best matches
               {activeQuery ? ` for "${activeQuery}"` : ""}.
             </p>
-            {hasMore ? (
-              <Button
-                className="h-9 rounded-none px-3"
-                size="sm"
-                variant="outline"
-                disabled={isLoadingMore}
-                onClick={() => void onLoadMore()}
-              >
-                <RefreshCw
-                  className={cn("size-4", isLoadingMore && "animate-spin")}
-                />
-                Load more
-              </Button>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -867,13 +855,10 @@ function CatalogResultRow({
             <Badge variant="secondary" className="rounded-none">
               {formatCatalogSwarmBadge(torrent.seeders, "seeders")}
             </Badge>
-            <Badge variant="outline" className="rounded-none">
-              {formatCatalogSwarmBadge(torrent.leechers, "leechers")}
-            </Badge>
             {torrent.completed !== null ? (
-              <span className="border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+              <Badge variant="outline" className="rounded-none">
                 {formatCompact(torrent.completed)} completed
-              </span>
+              </Badge>
             ) : null}
           </div>
 
@@ -881,7 +866,7 @@ function CatalogResultRow({
             {torrent.name}
           </h3>
 
-          <div className="flex flex-wrap items-start gap-x-5 gap-y-1.5 text-[11px]">
+          <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
             <TorrentMeta
               label="Size"
               value={
@@ -892,10 +877,6 @@ function CatalogResultRow({
             <TorrentMeta
               label="Published"
               value={formatCatalogPublishedAt(torrent)}
-            />
-            <TorrentMeta
-              label="Source"
-              value={`${torrent.infohash.slice(0, 8)}...${torrent.infohash.slice(-8)}`}
             />
           </div>
 
@@ -1738,11 +1719,31 @@ function formatCatalogSwarmBadge(value: number | null, label: string) {
 }
 
 function formatCatalogSwarm(torrent: CatalogTorrent) {
-  const seeders =
-    torrent.seeders === null ? "N/A" : formatCompact(torrent.seeders);
-  const leechers =
-    torrent.leechers === null ? "N/A" : formatCompact(torrent.leechers);
-  return `${seeders} seeding · ${leechers} leeching`;
+  return torrent.seeders === null
+    ? "Seeders n/a"
+    : `${formatCompact(torrent.seeders)} seeding`;
+}
+
+function getChartTimeDomain(
+  points: DownloadHistoryResponse["points"],
+  minimumSpanMs: number,
+) {
+  if (points.length === 0) {
+    return { startMs: 0, endMs: 0 };
+  }
+
+  const startMs = points[0]?.timestampMs ?? 0;
+  const endMs = points.at(-1)?.timestampMs ?? startMs;
+
+  if (endMs > startMs) {
+    return { startMs, endMs };
+  }
+
+  const halfSpanMs = Math.max(minimumSpanMs, 60_000) / 2;
+  return {
+    startMs: startMs - halfSpanMs,
+    endMs: endMs + halfSpanMs,
+  };
 }
 
 function formatCatalogPublishedAt(torrent: CatalogTorrent) {

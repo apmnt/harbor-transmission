@@ -17,7 +17,7 @@ interface TorrentCatalogState {
   results: CatalogTorrent[]
 }
 
-const SEARCH_LIMIT = 20
+const SEARCH_LIMIT = 10
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to query the torrent catalog.'

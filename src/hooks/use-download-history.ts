@@ -24,6 +24,17 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to load download history.'
 }
 
+function getHistoryChartSpeedCeiling(maxSpeedBps: number) {
+  if (maxSpeedBps <= 0) {
+    return 0
+  }
+
+  const paddedMaxSpeedBps = Math.max(maxSpeedBps * 1.2, 128 * 1024)
+  const magnitude = 10 ** Math.floor(Math.log10(paddedMaxSpeedBps))
+
+  return Math.ceil(paddedMaxSpeedBps / magnitude) * magnitude
+}
+
 export function useDownloadHistory({
   isLive,
   liveDownloadSpeedBps,
@@ -36,6 +47,7 @@ export function useDownloadHistory({
     isLoading: true,
   })
   const [livePoints, setLivePoints] = useState<DownloadHistoryPoint[]>([])
+  const [liveChartCeilingBps, setLiveChartCeilingBps] = useState(0)
 
   useEffect(() => {
     liveDownloadSpeedRef.current = liveDownloadSpeedBps
@@ -88,6 +100,11 @@ export function useDownloadHistory({
         sampleCount: 1,
       }
 
+      setLiveChartCeilingBps((current) => {
+        const next = getHistoryChartSpeedCeiling(livePoint.averageDownloadSpeedBps)
+        return next > current ? next : current
+      })
+
       setLivePoints((current) => [
         ...current.filter((point) => point.timestampMs >= nowMs - LIVE_CHART_WINDOW_MS),
         livePoint,
@@ -124,6 +141,7 @@ export function useDownloadHistory({
 
   return {
     ...state,
+    liveChartCeilingBps,
     liveData,
   }
 }

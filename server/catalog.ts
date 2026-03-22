@@ -6,8 +6,8 @@ import type { Plugin } from 'vite'
 
 const CATALOG_ROUTE = '/api/catalog/search'
 const MIN_QUERY_LENGTH = 2
-const DEFAULT_LIMIT = 20
-const MAX_LIMIT = 50
+const DEFAULT_LIMIT = 10
+const MAX_LIMIT = 10
 const csvPath = fileURLToPath(new URL('../torrents-csv-data/torrents.csv', import.meta.url))
 const outputDir = fileURLToPath(new URL('../data', import.meta.url))
 const outputPath = fileURLToPath(new URL('../data/torrents-catalog.parquet', import.meta.url))

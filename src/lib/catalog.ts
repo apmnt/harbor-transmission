@@ -56,7 +56,7 @@ export class TorrentCatalogClient {
     } = {},
   ) {
     const normalizedQuery = normalizeCatalogSearchQuery(query)
-    const limit = options.limit ?? 20
+    const limit = options.limit ?? 10
     const offset = options.offset ?? 0
 
     if (!canSearchCatalog(normalizedQuery)) {
