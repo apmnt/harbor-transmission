@@ -7,6 +7,7 @@ export interface MullvadLocation {
   city: string | null
   organization: string | null
   hostname: string | null
+  serverType: string | null
   bridgeHostname: string | null
   entryHostname: string | null
   obfuscatorHostname: string | null
@@ -64,6 +65,18 @@ export function getMullvadServerLabel(status: MullvadStatus) {
 
   const activeIp = activeAddressFamily === 'ipv6' ? location.ipv6 : location.ipv4
   if (!activeIp) return null
+
+  if (location.hostname) {
+    const parts = [location.hostname]
+
+    if (location.serverType) {
+      parts.push(location.serverType)
+    }
+
+    parts.push(activeAddressFamily.toUpperCase())
+
+    return parts.join(' · ')
+  }
 
   const familyLabel = activeAddressFamily === 'ipv6' ? 'IPv6 exit' : 'IPv4 exit'
 

@@ -23,6 +23,8 @@ interface RawMullvadAddressStatus {
   country?: string | null
   city?: string | null
   mullvad_exit_ip?: boolean
+  mullvad_exit_ip_hostname?: string | null
+  mullvad_server_type?: string | null
   organization?: string | null
 }
 
@@ -35,6 +37,8 @@ interface NormalizedAddressStatus {
   ip: string
   country: string | null
   city: string | null
+  hostname: string | null
+  serverType: string | null
   mullvadExitIp: boolean
   organization: string | null
 }
@@ -52,6 +56,7 @@ interface MullvadStatusResponse {
     city: string | null
     organization: string | null
     hostname: string | null
+    serverType: string | null
     bridgeHostname: string | null
     entryHostname: string | null
     obfuscatorHostname: string | null
@@ -107,6 +112,8 @@ async function readAddressStatus(addressFamily: AddressFamily): Promise<Normaliz
     ip,
     country: maybeString(statusPayload.country),
     city: maybeString(statusPayload.city),
+    hostname: maybeString(statusPayload.mullvad_exit_ip_hostname),
+    serverType: maybeString(statusPayload.mullvad_server_type),
     mullvadExitIp:
       typeof checkPayload.mullvad_exit_ip === 'boolean'
         ? checkPayload.mullvad_exit_ip
@@ -186,7 +193,8 @@ async function readMullvadStatus(): Promise<MullvadStatusResponse> {
       country: activeAddress?.country ?? null,
       city: activeAddress?.city ?? null,
       organization: activeAddress?.organization ?? null,
-      hostname: null,
+      hostname: activeAddress?.hostname ?? null,
+      serverType: activeAddress?.serverType ?? null,
       bridgeHostname: null,
       entryHostname: null,
       obfuscatorHostname: null,
