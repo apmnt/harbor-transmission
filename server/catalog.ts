@@ -2,7 +2,6 @@ import { access, mkdir, rm } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { fileURLToPath } from 'node:url'
 
-import { DuckDBInstance } from '@duckdb/node-api'
 import type { Plugin } from 'vite'
 
 const CATALOG_ROUTE = '/api/catalog/search'
@@ -85,7 +84,21 @@ interface SearchParams {
   offset: number
 }
 
-let catalogInstancePromise: Promise<DuckDBInstance> | null = null
+interface DuckDbReader {
+  getRowObjectsJS(): Record<string, unknown>[]
+}
+
+interface DuckDbConnection {
+  closeSync(): void
+  run(sql: string, params?: Record<string, unknown>): Promise<void>
+  runAndReadAll(sql: string, params?: Record<string, unknown>): Promise<DuckDbReader>
+}
+
+interface DuckDbInstanceLike {
+  connect(): Promise<DuckDbConnection>
+}
+
+let catalogInstancePromise: Promise<DuckDbInstanceLike> | null = null
 let generationPromise: Promise<void> | null = null
 
 function clampInteger(value: string | null, fallback: number, min: number, max: number) {
@@ -107,9 +120,20 @@ function isInfohash(value: string) {
   return /^[a-f0-9]{40}$/i.test(value)
 }
 
+async function loadDuckDb() {
+  const duckDbModuleName = '@duckdb/node-api'
+  const duckDbModule = (await import(duckDbModuleName)) as {
+    DuckDBInstance: {
+      create(path: string): Promise<DuckDbInstanceLike>
+    }
+  }
+
+  return duckDbModule.DuckDBInstance
+}
+
 function getDuckDbInstance() {
   if (!catalogInstancePromise) {
-    catalogInstancePromise = DuckDBInstance.create(':memory:')
+    catalogInstancePromise = loadDuckDb().then((DuckDBInstance) => DuckDBInstance.create(':memory:'))
   }
 
   return catalogInstancePromise
