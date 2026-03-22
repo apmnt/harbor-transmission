@@ -1,10 +1,11 @@
 import { Buffer } from 'node:buffer'
 import { mkdir } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 
 import type { Plugin } from 'vite'
+
+import { openSqliteDatabase, type SqliteDatabase } from './sqlite'
 
 const DOWNLOAD_HISTORY_ROUTE = '/api/history/download-speed'
 const SAMPLE_INTERVAL_MS = 30_000
@@ -67,7 +68,7 @@ interface DownloadHistoryIngestRequest {
   uploadSpeedBps?: number
 }
 
-let historyDatabase: DatabaseSync | null = null
+let historyDatabase: SqliteDatabase | null = null
 let historyReadyPromise: Promise<void> | null = null
 let samplerStarted = false
 let samplerTimeout: ReturnType<typeof setTimeout> | null = null
@@ -93,9 +94,9 @@ function maybeNumber(value: unknown) {
   return null
 }
 
-function getHistoryDatabase() {
+async function getHistoryDatabase() {
   if (!historyDatabase) {
-    historyDatabase = new DatabaseSync(historyDatabasePath)
+    historyDatabase = await openSqliteDatabase(historyDatabasePath)
     historyDatabase.exec(schemaSql)
   }
 
@@ -106,7 +107,7 @@ async function ensureHistoryDatabase() {
   if (!historyReadyPromise) {
     historyReadyPromise = (async () => {
       await mkdir(outputDir, { recursive: true })
-      getHistoryDatabase()
+      await getHistoryDatabase()
     })()
   }
 
@@ -197,7 +198,7 @@ async function writeDownloadSample(
 ) {
   await ensureHistoryDatabase()
 
-  const db = getHistoryDatabase()
+  const db = await getHistoryDatabase()
   db.prepare(
     `
       INSERT INTO transmission_download_history (
@@ -275,7 +276,7 @@ function stopSampler() {
 async function readDownloadHistory(): Promise<DownloadHistoryResponse> {
   await ensureHistoryDatabase()
 
-  const db = getHistoryDatabase()
+  const db = await getHistoryDatabase()
   const rangeEndMs = Date.now()
   const rangeStartMs = rangeEndMs - HISTORY_WINDOW_MS
 
