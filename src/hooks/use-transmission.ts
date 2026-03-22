@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { getTorrentFileUrl, type CatalogTorrent } from '@/lib/catalog'
 import { demoSnapshot } from '@/lib/demo-data'
 import {
   MullvadStatusClient,
@@ -33,6 +34,63 @@ function updateDemoTorrent(
   updater: (torrent: TransmissionTorrent) => TransmissionTorrent,
 ) {
   return updater({ ...torrent })
+}
+
+function getNextTorrentId(torrents: TransmissionTorrent[]) {
+  return torrents.reduce((maxId, torrent) => Math.max(maxId, torrent.id), 0) + 1
+}
+
+function getNextQueuePosition(torrents: TransmissionTorrent[]) {
+  return torrents.reduce((maxQueuePosition, torrent) => Math.max(maxQueuePosition, torrent.queue_position), -1) + 1
+}
+
+function createDemoCatalogTorrent(
+  torrent: CatalogTorrent,
+  snapshot: TransmissionSnapshot,
+): TransmissionTorrent {
+  const now = Math.floor(Date.now() / 1000)
+  const totalSize = torrent.sizeBytes ?? 0
+  const timestamp = torrent.createdUnix ?? torrent.published ?? now
+
+  return {
+    id: getNextTorrentId(snapshot.torrents),
+    name: torrent.name,
+    status: TRANSMISSION_STATUS.downloadWait,
+    error: 0,
+    error_string: '',
+    eta: -1,
+    is_finished: false,
+    is_stalled: false,
+    labels: ['catalog'],
+    left_until_done: totalSize,
+    metadata_percent_complete: 1,
+    peers_connected: 0,
+    peers_getting_from_us: 0,
+    peers_sending_to_us: 0,
+    percent_done: 0,
+    queue_position: getNextQueuePosition(snapshot.torrents),
+    rate_download: 0,
+    rate_upload: 0,
+    recheck_progress: 0,
+    seed_ratio_limit: snapshot.session.seed_ratio_limit,
+    seed_ratio_mode: snapshot.session.seed_ratio_limited ? 1 : 0,
+    size_when_done: totalSize,
+    total_size: totalSize,
+    trackers: [],
+    download_dir: snapshot.session.download_dir,
+    uploaded_ever: 0,
+    upload_ratio: 0,
+    webseeds_sending_to_us: 0,
+    added_date: now,
+    file_count: 1,
+    primary_mime_type: 'application/x-bittorrent',
+    hash_string: torrent.infohash,
+    magnet_link: `magnet:?xt=urn:btih:${torrent.infohash}`,
+    is_private: false,
+    comment: 'Added from Harbor catalog',
+    creator: 'Harbor',
+    date_created: timestamp,
+  }
 }
 
 async function getTransmissionSnapshot(client: TransmissionRpcClient) {
@@ -275,7 +333,44 @@ export function useTransmission() {
     [client, runAction],
   )
 
+  const addCatalogTorrent = useCallback(
+    async (torrent: CatalogTorrent) => {
+      await runAction(
+        `catalog-${torrent.infohash}`,
+        () => client.addTorrentByUrl(getTorrentFileUrl(torrent.infohash)),
+        (current) => {
+          if (current.torrents.some((value) => value.hash_string === torrent.infohash)) {
+            return {
+              ...current,
+              lastUpdated: new Date().toISOString(),
+            }
+          }
+
+          return {
+            ...current,
+            stats: {
+              ...current.stats,
+              torrent_count: current.stats.torrent_count + 1,
+              current_stats: {
+                ...current.stats.current_stats,
+                files_added: current.stats.current_stats.files_added + 1,
+              },
+              cumulative_stats: {
+                ...current.stats.cumulative_stats,
+                files_added: current.stats.cumulative_stats.files_added + 1,
+              },
+            },
+            torrents: [...current.torrents, createDemoCatalogTorrent(torrent, current)],
+            lastUpdated: new Date().toISOString(),
+          }
+        },
+      )
+    },
+    [client, runAction],
+  )
+
   return {
+    addCatalogTorrent,
     snapshot,
     pendingAction,
     refresh: () => refresh(false),

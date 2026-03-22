@@ -36,7 +36,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
+import { useTorrentCatalog } from '@/hooks/use-torrent-catalog'
 import { useTransmission } from '@/hooks/use-transmission'
+import type { CatalogTorrent } from '@/lib/catalog'
 import {
   getMullvadLocationLabel,
   getMullvadServerLabel,
@@ -66,6 +68,7 @@ import {
 } from '@/lib/transmission'
 import {
   formatBytes,
+  formatCompact,
   formatDuration,
   formatRatio,
   formatSpeedBps,
@@ -93,8 +96,17 @@ const sortOptions: { label: string; value: SortMode }[] = [
 ]
 
 function App() {
-  const { pauseAll, pendingAction, refresh, removeTorrent, snapshot, startAll, toggleTorrent } =
-    useTransmission()
+  const {
+    addCatalogTorrent,
+    pauseAll,
+    pendingAction,
+    refresh,
+    removeTorrent,
+    snapshot,
+    startAll,
+    toggleTorrent,
+  } = useTransmission()
+  const catalog = useTorrentCatalog()
   const [filter, setFilter] = useState<TorrentFilter>('all')
   const [sortMode, setSortMode] = useState<SortMode>('queue')
   const [query, setQuery] = useState('')
@@ -151,6 +163,22 @@ function App() {
         version={snapshot.session.version}
       />
 
+      <CatalogSection
+        activeQuery={catalog.activeQuery}
+        canSearch={catalog.canSearch}
+        error={catalog.error}
+        hasMore={catalog.hasMore}
+        hasSearched={catalog.hasSearched}
+        isLoading={catalog.isLoading}
+        isLoadingMore={catalog.isLoadingMore}
+        onAddTorrent={addCatalogTorrent}
+        onLoadMore={catalog.loadMore}
+        onQueryChange={catalog.setQuery}
+        pendingAction={pendingAction}
+        query={catalog.query}
+        results={catalog.results}
+      />
+
       <QueueSection
         copiedTorrentId={copiedTorrentId}
         counts={counts}
@@ -180,6 +208,139 @@ function App() {
         totalRatio={totalRatio}
       />
     </div>
+  )
+}
+
+function CatalogSection({
+  activeQuery,
+  canSearch,
+  error,
+  hasMore,
+  hasSearched,
+  isLoading,
+  isLoadingMore,
+  onAddTorrent,
+  onLoadMore,
+  onQueryChange,
+  pendingAction,
+  query,
+  results,
+}: {
+  activeQuery: string
+  canSearch: boolean
+  error: string | null
+  hasMore: boolean
+  hasSearched: boolean
+  isLoading: boolean
+  isLoadingMore: boolean
+  onAddTorrent: (torrent: CatalogTorrent) => Promise<void>
+  onLoadMore: () => Promise<void>
+  onQueryChange: (value: string) => void
+  pendingAction: string | null
+  query: string
+  results: CatalogTorrent[]
+}) {
+  const trimmedQuery = query.trim()
+
+  return (
+    <section className="w-full border-b border-border bg-background">
+      <div className="w-full min-w-0 px-3 py-4 sm:px-5 lg:px-6">
+        <div className="space-y-1">
+          <h2 className="font-display text-2xl tracking-[-0.06em] text-foreground">Catalog</h2>
+          <p className="text-sm text-muted-foreground">
+            Search the local Parquet mirror generated from <code>torrents-csv-data</code> and send
+            the matching <code>.torrent</code> file to Transmission with one tap.
+          </p>
+        </div>
+
+        <div className="mt-3 relative min-w-0">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            aria-label="Search catalog"
+            className="h-10 rounded-none border-x-0 border-t-0 border-b border-border bg-transparent px-0 pl-9 pr-9 shadow-none focus-visible:ring-0"
+            placeholder="Search catalog by title or paste a full infohash"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+          />
+          {query ? (
+            <button
+              aria-label="Clear catalog search"
+              className="absolute right-0 top-1/2 inline-flex h-10 w-9 -translate-y-1/2 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => onQueryChange('')}
+              type="button"
+            >
+              <X className="size-4" />
+            </button>
+          ) : null}
+        </div>
+
+        {!trimmedQuery ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Start typing to search the local catalog. Exact 40-character infohashes match directly.
+          </p>
+        ) : !canSearch ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Type at least 2 characters or paste a full 40-character infohash.
+          </p>
+        ) : null}
+
+        {error ? (
+          <div className="mt-4 border-y border-border bg-muted/35 px-3 py-3 text-sm">
+            <p className="font-semibold text-foreground">Catalog search is unavailable.</p>
+            <p className="mt-1 text-muted-foreground">{error}</p>
+          </div>
+        ) : null}
+
+        <div className="mt-4 border-t border-border">
+          {isLoading ? (
+            <div className="border-b border-border py-12 text-center">
+              <RefreshCw className="mx-auto size-8 animate-spin text-muted-foreground" />
+              <p className="mt-3 font-medium text-foreground">Searching the Parquet catalog.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                DuckDB is scanning the local dataset for the strongest matches.
+              </p>
+            </div>
+          ) : results.length > 0 ? (
+            results.map((torrent) => (
+              <CatalogResultRow
+                key={torrent.infohash}
+                isBusy={pendingAction === `catalog-${torrent.infohash}`}
+                onAdd={() => onAddTorrent(torrent)}
+                torrent={torrent}
+              />
+            ))
+          ) : hasSearched && canSearch && !error ? (
+            <div className="border-b border-border py-12 text-center">
+              <Layers3 className="mx-auto size-8 text-muted-foreground" />
+              <p className="mt-3 font-medium text-foreground">No catalog matches found.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Try a broader title fragment or paste the exact infohash.
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        {results.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              Showing {results.length} best matches{activeQuery ? ` for "${activeQuery}"` : ''}.
+            </p>
+            {hasMore ? (
+              <Button
+                className="h-9 rounded-none px-3"
+                size="sm"
+                variant="outline"
+                disabled={isLoadingMore}
+                onClick={() => void onLoadMore()}
+              >
+                <RefreshCw className={cn('size-4', isLoadingMore && 'animate-spin')} />
+                Load more
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </section>
   )
 }
 
@@ -293,6 +454,65 @@ function HeroBand({
       </div>
       <HalftoneTransition />
     </header>
+  )
+}
+
+function CatalogResultRow({
+  isBusy,
+  onAdd,
+  torrent,
+}: {
+  isBusy: boolean
+  onAdd: () => Promise<void>
+  torrent: CatalogTorrent
+}) {
+  return (
+    <article className="w-full border-b border-border last:border-b-0">
+      <div className="flex items-start gap-3 py-3">
+        <Button
+          className="h-16 w-16 shrink-0 self-center rounded-none px-0 text-[11px] uppercase tracking-[0.14em]"
+          size="sm"
+          variant={isBusy ? 'outline' : 'default'}
+          disabled={isBusy}
+          onClick={() => void onAdd()}
+        >
+          <HardDriveDownload className={cn('size-4', isBusy && 'animate-pulse')} />
+          {isBusy ? 'Adding' : 'Add'}
+        </Button>
+
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="secondary" className="rounded-none">
+              {formatCatalogSwarmBadge(torrent.seeders, 'seeders')}
+            </Badge>
+            <Badge variant="outline" className="rounded-none">
+              {formatCatalogSwarmBadge(torrent.leechers, 'leechers')}
+            </Badge>
+            {torrent.completed !== null ? (
+              <span className="border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                {formatCompact(torrent.completed)} completed
+              </span>
+            ) : null}
+          </div>
+
+          <h3 className="break-words font-display text-base leading-tight tracking-[-0.04em] text-foreground sm:text-lg">
+            {torrent.name}
+          </h3>
+
+          <div className="flex flex-wrap items-start gap-x-5 gap-y-1.5 text-[11px]">
+            <TorrentMeta label="Size" value={torrent.sizeBytes ? formatBytes(torrent.sizeBytes) : 'Unknown'} />
+            <TorrentMeta label="Swarm" value={formatCatalogSwarm(torrent)} />
+            <TorrentMeta label="Published" value={formatCatalogPublishedAt(torrent)} />
+            <TorrentMeta
+              label="Source"
+              value={`${torrent.infohash.slice(0, 8)}...${torrent.infohash.slice(-8)}`}
+            />
+          </div>
+
+          <p className="break-all font-mono text-[11px] text-muted-foreground">{torrent.infohash}</p>
+        </div>
+      </div>
+    </article>
   )
 }
 
@@ -988,6 +1208,21 @@ function compactProgressLabel(torrent: TransmissionTorrent) {
   }
 
   return `${formatBytes(torrent.size_when_done - torrent.left_until_done)} of ${formatBytes(torrent.size_when_done)}`
+}
+
+function formatCatalogSwarmBadge(value: number | null, label: string) {
+  return value === null ? `${label} n/a` : `${formatCompact(value)} ${label}`
+}
+
+function formatCatalogSwarm(torrent: CatalogTorrent) {
+  const seeders = torrent.seeders === null ? 'N/A' : formatCompact(torrent.seeders)
+  const leechers = torrent.leechers === null ? 'N/A' : formatCompact(torrent.leechers)
+  return `${seeders} seeding · ${leechers} leeching`
+}
+
+function formatCatalogPublishedAt(torrent: CatalogTorrent) {
+  const timestamp = torrent.published ?? torrent.createdUnix ?? torrent.scrapedDate
+  return timestamp ? formatTimestamp(timestamp) : 'N/A'
 }
 
 export default App

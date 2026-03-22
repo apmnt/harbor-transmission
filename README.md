@@ -10,20 +10,25 @@ The app is designed around Transmission's existing web interface and RPC model. 
 - Transmission RPC polling with `X-Transmission-Session-Id` retry handling
 - Session telemetry panel for speed limits, queue settings, ratios, and free space
 - Mullvad VPN status with public exit detection, active usage, and current exit IP/location
+- DuckDB-backed torrent catalog search over a generated Parquet dataset
+- One-click `.torrent` adds from the catalog UI using Transmission's native `torrent-add` URL flow
 - Torrent cards with queue state, progress, ETA, peer details, labels, and quick start/pause controls
 - Demo fallback when the local Transmission RPC endpoint is unavailable
-- Vite dev middleware for a local Transmission daemon and Mullvad public-status checks on macOS
+- Vite dev middleware for a local Transmission daemon, DuckDB catalog search, and Mullvad public-status checks on macOS
 
 ## Run it
 
 ```bash
 bun install
+bun run catalog:build
 bun run dev
 ```
 
 By default the Vite dev server proxies `/transmission/*` to `http://127.0.0.1:9091`, which matches the usual local Transmission setup on macOS.
 
 The app also exposes `/api/mullvad/status` during `bun run dev` and `bun run preview`. That endpoint queries Mullvad's public connection-check APIs, which works for direct Mullvad connections and Tailscale sessions using Mullvad as an exit node.
+
+The torrent catalog lives at `/api/catalog/search`. It queries `data/torrents-catalog.parquet` with DuckDB. If the Parquet file is missing and `torrents-csv-data/torrents.csv` exists, the server will generate the Parquet file on the first catalog request.
 
 `bun run dev` now starts Vite with `--host`, so it binds on your LAN and can be opened from your phone using the network URL shown in the terminal.
 
@@ -36,6 +41,7 @@ TRANSMISSION_RPC_TARGET=http://127.0.0.1:9091
 TRANSMISSION_RPC_USERNAME=
 TRANSMISSION_RPC_PASSWORD=
 VITE_TRANSMISSION_RPC_URL=/transmission/rpc
+VITE_TORRENT_CATALOG_URL=/api/catalog/search
 VITE_MULLVAD_STATUS_URL=/api/mullvad/status
 ```
 
@@ -43,13 +49,15 @@ Notes:
 
 - `TRANSMISSION_RPC_TARGET`, `TRANSMISSION_RPC_USERNAME`, and `TRANSMISSION_RPC_PASSWORD` are used by the Vite dev proxy.
 - `VITE_TRANSMISSION_RPC_URL` is the client-side RPC URL. The default is `/transmission/rpc`.
+- `VITE_TORRENT_CATALOG_URL` is the client-side DuckDB search endpoint. The default is `/api/catalog/search`.
 - `VITE_MULLVAD_STATUS_URL` is the client-side Mullvad status URL. The default is `/api/mullvad/status`.
 - For a production/static deployment, serve the built app behind a proxy that exposes Transmission RPC at the same origin, or set `VITE_TRANSMISSION_RPC_URL` to a compatible endpoint.
-- For a production/static deployment, expose a same-origin endpoint compatible with `/api/mullvad/status`, or set `VITE_MULLVAD_STATUS_URL` to wherever that endpoint lives.
+- For a production/static deployment, expose same-origin endpoints compatible with `/api/catalog/search` and `/api/mullvad/status`, or point `VITE_TORRENT_CATALOG_URL` and `VITE_MULLVAD_STATUS_URL` at wherever those endpoints live.
 
 ## Scripts
 
 ```bash
+bun run catalog:build
 bun run dev
 bun run build
 bun run lint
@@ -67,5 +75,5 @@ bun run preview
 
 ## Current limitations
 
-- Production use still needs same-origin infrastructure for Transmission RPC and Mullvad status, or explicit compatible endpoint URLs for both.
+- Production use still needs same-origin infrastructure for Transmission RPC, catalog search, and Mullvad status, or explicit compatible endpoint URLs for all three.
 - The demo mode is intentional fallback UI for disconnected development; it is not a daemon simulator.
