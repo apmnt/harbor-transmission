@@ -298,6 +298,20 @@ export class TransmissionRpcClient {
     })
   }
 
+  async addTorrentByMetainfo(
+    metainfo: string,
+    options: {
+      downloadDir?: string
+      paused?: boolean
+    } = {},
+  ) {
+    return this.request('torrent_add', {
+      metainfo,
+      paused: options.paused,
+      ...(options.downloadDir ? { download_dir: options.downloadDir } : {}),
+    })
+  }
+
   async setAltSpeed(enabled: boolean) {
     return this.request('session_set', { alt_speed_enabled: enabled })
   }

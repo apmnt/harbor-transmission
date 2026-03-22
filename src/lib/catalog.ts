@@ -18,6 +18,12 @@ export interface CatalogSearchResponse {
   offset: number
 }
 
+export interface CatalogTorrentFileResponse {
+  infohash: string
+  metainfo: string
+  sourceUrl: string
+}
+
 const INFOHASH_PATTERN = /^[a-f0-9]{40}$/i
 
 export function normalizeCatalogSearchQuery(query: string) {
@@ -42,9 +48,11 @@ export function getTorrentFileUrl(infohash: string) {
 
 export class TorrentCatalogClient {
   private endpoint: string
+  private torrentEndpoint: string
 
   constructor(endpoint = import.meta.env.VITE_TORRENT_CATALOG_URL ?? '/api/catalog/search') {
     this.endpoint = endpoint
+    this.torrentEndpoint = endpoint.replace(/\/search$/, '/torrent')
   }
 
   async search(
@@ -88,5 +96,31 @@ export class TorrentCatalogClient {
     }
 
     return (await response.json()) as CatalogSearchResponse
+  }
+
+  async getTorrentMetainfo(infohash: string, options: { signal?: AbortSignal } = {}) {
+    const normalizedInfohash = infohash.trim().toLowerCase()
+
+    if (!isInfohashQuery(normalizedInfohash)) {
+      throw new Error('A valid 40-character infohash is required.')
+    }
+
+    const url = new URL(this.torrentEndpoint, window.location.origin)
+    url.searchParams.set('infohash', normalizedInfohash)
+
+    const response = await fetch(url, {
+      headers: {
+        'cache-control': 'no-cache',
+      },
+      credentials: 'include',
+      signal: options.signal,
+    })
+
+    if (!response.ok) {
+      const message = await response.text()
+      throw new Error(message || `Torrent file request failed with ${response.status}.`)
+    }
+
+    return (await response.json()) as CatalogTorrentFileResponse
   }
 }

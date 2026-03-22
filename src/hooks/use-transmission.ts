@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { getTorrentFileUrl, type CatalogTorrent } from '@/lib/catalog'
+import { TorrentCatalogClient, type CatalogTorrent } from '@/lib/catalog'
 import { demoSnapshot } from '@/lib/demo-data'
 import {
   MullvadStatusClient,
@@ -118,6 +118,7 @@ async function getTransmissionSnapshot(client: TransmissionRpcClient) {
 
 export function useTransmission() {
   const client = useMemo(() => new TransmissionRpcClient(), [])
+  const catalogClient = useMemo(() => new TorrentCatalogClient(), [])
   const mullvadClient = useMemo(() => new MullvadStatusClient(), [])
   const [snapshot, setSnapshot] = useState<TransmissionSnapshot>({
     ...demoSnapshot,
@@ -337,7 +338,13 @@ export function useTransmission() {
     async (torrent: CatalogTorrent) => {
       await runAction(
         `catalog-${torrent.infohash}`,
-        () => client.addTorrentByUrl(getTorrentFileUrl(torrent.infohash)),
+        async () => {
+          const { metainfo } = await catalogClient.getTorrentMetainfo(torrent.infohash)
+          return client.addTorrentByMetainfo(metainfo, {
+            downloadDir: snapshot.session.download_dir,
+            paused: snapshot.session.start_added_torrents === false,
+          })
+        },
         (current) => {
           if (current.torrents.some((value) => value.hash_string === torrent.infohash)) {
             return {
@@ -366,7 +373,7 @@ export function useTransmission() {
         },
       )
     },
-    [client, runAction],
+    [catalogClient, client, runAction, snapshot.session.download_dir, snapshot.session.start_added_torrents],
   )
 
   return {
