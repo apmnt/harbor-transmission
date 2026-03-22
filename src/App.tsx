@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowDown,
@@ -264,6 +264,162 @@ const liveDownloadChartConfig = {
   },
 } satisfies ChartConfig;
 
+const LIVE_CHART_EASING_MS = 220;
+const DEMO_LIVE_CHART_WINDOW_MS = 5 * 60 * 1000;
+const DEMO_LIVE_CHART_STEP_MS = 1_000;
+
+function getSyntheticDownloadSpeedBps(timestampMs: number) {
+  const slowWave = Math.sin(timestampMs / 31_000);
+  const midWave = Math.sin(timestampMs / 11_000 + 1.7);
+  const fastWave = Math.cos(timestampMs / 4_500 - 0.8);
+  const pulse = Math.max(0, Math.sin(timestampMs / 19_000 - 0.6));
+
+  return Math.max(
+    96 * 1024,
+    1_600_000 +
+      slowWave * 900_000 +
+      midWave * 450_000 +
+      fastWave * 140_000 +
+      pulse * 700_000,
+  );
+}
+
+function buildSyntheticLiveChart(nowMs: number): DownloadHistoryResponse {
+  const rangeEndMs = nowMs;
+  const rangeStartMs = rangeEndMs - DEMO_LIVE_CHART_WINDOW_MS;
+  const points: DownloadHistoryResponse["points"] = [];
+
+  for (
+    let timestampMs = rangeStartMs;
+    timestampMs <= rangeEndMs;
+    timestampMs += DEMO_LIVE_CHART_STEP_MS
+  ) {
+    const speedBps = getSyntheticDownloadSpeedBps(timestampMs);
+
+    points.push({
+      timestampMs,
+      averageDownloadSpeedBps: speedBps,
+      peakDownloadSpeedBps: speedBps,
+      sampleCount: 1,
+    });
+  }
+
+  return {
+    points,
+    bucketMs: DEMO_LIVE_CHART_STEP_MS,
+    capturedEveryMs: DEMO_LIVE_CHART_STEP_MS,
+    rangeStartMs,
+    rangeEndMs,
+    lastRecordedAtMs: null,
+  };
+}
+
+function useAnimatedLiveChart({
+  isLive,
+  liveData,
+}: {
+  isLive: boolean;
+  liveData: DownloadHistoryResponse | null;
+}) {
+  const latestPoint = liveData?.points.at(-1) ?? null;
+  const animatedSpeedRef = useRef(0);
+  const targetSpeedRef = useRef(0);
+  const hasSeededAnimationRef = useRef(false);
+  const [frame, setFrame] = useState(() => ({
+    nowMs: Date.now(),
+    speedBps: 0,
+  }));
+
+  useEffect(() => {
+    if (!latestPoint) {
+      animatedSpeedRef.current = 0;
+      targetSpeedRef.current = 0;
+      hasSeededAnimationRef.current = false;
+      return;
+    }
+
+    targetSpeedRef.current = latestPoint.averageDownloadSpeedBps;
+
+    if (!hasSeededAnimationRef.current) {
+      animatedSpeedRef.current = latestPoint.averageDownloadSpeedBps;
+      hasSeededAnimationRef.current = true;
+    }
+  }, [latestPoint]);
+
+  useEffect(() => {
+    let animationFrameId = 0;
+    let previousFrameMs = performance.now();
+
+    const tick = (frameMs: number) => {
+      const deltaMs = Math.min(frameMs - previousFrameMs, 64);
+      previousFrameMs = frameMs;
+      const nowMs = Date.now();
+      let nextSpeedBps = animatedSpeedRef.current;
+
+      if (isLive && latestPoint) {
+        const smoothingFactor = 1 - Math.exp(-deltaMs / LIVE_CHART_EASING_MS);
+        nextSpeedBps =
+          animatedSpeedRef.current +
+          (targetSpeedRef.current - animatedSpeedRef.current) * smoothingFactor;
+
+        animatedSpeedRef.current = nextSpeedBps;
+      } else if (!isLive) {
+        nextSpeedBps = getSyntheticDownloadSpeedBps(nowMs);
+      }
+
+      setFrame({
+        nowMs,
+        speedBps: nextSpeedBps,
+      });
+
+      animationFrameId = window.requestAnimationFrame(tick);
+    };
+
+    animationFrameId = window.requestAnimationFrame(tick);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [isLive, latestPoint]);
+
+  return useMemo<DownloadHistoryResponse | null>(() => {
+    if (!isLive) {
+      return buildSyntheticLiveChart(frame.nowMs);
+    }
+
+    if (!liveData || liveData.points.length === 0) {
+      return null;
+    }
+
+    if (frame.nowMs === 0) {
+      return liveData;
+    }
+
+    const chartWindowMs = Math.max(
+      liveData.rangeEndMs - liveData.rangeStartMs,
+      liveData.bucketMs,
+    );
+    const rangeEndMs = Math.max(frame.nowMs, liveData.rangeEndMs);
+    const rangeStartMs = rangeEndMs - chartWindowMs;
+    const visiblePoints = liveData.points.filter(
+      (point) => point.timestampMs >= rangeStartMs,
+    );
+    const tailPoint: DownloadHistoryResponse["points"][number] = {
+      timestampMs: rangeEndMs,
+      averageDownloadSpeedBps: frame.speedBps,
+      peakDownloadSpeedBps: frame.speedBps,
+      sampleCount: 1,
+    };
+
+    return {
+      ...liveData,
+      points: [...visiblePoints, tailPoint],
+      rangeStartMs,
+      rangeEndMs,
+    };
+  }, [frame.nowMs, frame.speedBps, isLive, liveData]);
+}
+
 function DownloadHistorySection({
   data,
   error,
@@ -282,6 +438,7 @@ function DownloadHistorySection({
   const points = data?.points ?? [];
   const latestPoint = points.at(-1) ?? null;
   const weeklyChartDomain = getChartTimeDomain(points, data?.bucketMs ?? 60_000);
+  const animatedLiveData = useAnimatedLiveChart({ isLive, liveData });
   const averageSpeed =
     points.length > 0
       ? points.reduce(
@@ -427,20 +584,21 @@ function DownloadHistorySection({
                       Live monitor
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                      Fresh in-memory samples collected every second in a
-                      rolling five-minute window.
+                      {isLive
+                        ? "Fresh in-memory samples collected every second in a rolling five-minute window."
+                        : "Synthetic rolling data while the daemon is offline."}
                     </p>
                   </div>
                 </div>
 
-                {liveData && liveData.points.length > 0 ? (
+                {animatedLiveData && animatedLiveData.points.length > 0 ? (
                   <DownloadSpeedChart
                     animated
                     config={liveDownloadChartConfig}
-                    domainEndMs={liveData.rangeEndMs}
-                    domainStartMs={liveData.rangeStartMs}
+                    domainEndMs={animatedLiveData.rangeEndMs}
+                    domainStartMs={animatedLiveData.rangeStartMs}
                     emptyMessage="Waiting for live download samples."
-                    points={liveData.points}
+                    points={animatedLiveData.points}
                     tooltipLabelFormatter={formatLiveHistoryTooltipLabel}
                     yAxisDomain={liveYAxisDomain}
                     xAxisTickFormatter={formatLiveHistoryAxisLabel}
