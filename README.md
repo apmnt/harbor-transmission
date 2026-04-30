@@ -10,18 +10,17 @@ The app is designed around Transmission's existing web interface and RPC model. 
 - Transmission RPC polling with `X-Transmission-Session-Id` retry handling
 - Session telemetry panel for speed limits, queue settings, ratios, and free space
 - Mullvad VPN status with public exit detection, active usage, and current exit IP/location
-- DuckDB-backed torrent catalog search over a generated Parquet dataset
+- Prowlarr-backed torrent search across your configured indexers
 - Weekly download-speed history chart backed by a local 30-second SQLite history store
-- One-click magnet adds from the catalog UI using Transmission's native `torrent-add` URL flow
+- One-click magnet adds from search results using Transmission's native `torrent-add` URL flow
 - Torrent cards with queue state, progress, ETA, peer details, labels, and quick start/pause controls
 - Demo fallback when the local Transmission RPC endpoint is unavailable
-- Vite dev middleware for a local Transmission daemon, DuckDB catalog search, and Mullvad public-status checks on macOS
+- Vite dev middleware for a local Transmission daemon, Mullvad public-status checks on macOS
 
 ## Run it
 
 ```bash
 bun install
-bun run catalog:build
 bun run dev
 ```
 
@@ -29,38 +28,49 @@ By default the Vite dev server proxies `/transmission/*` to `http://127.0.0.1:90
 
 The app also exposes `/api/mullvad/status` during `bun run dev` and `bun run preview`. That endpoint queries Mullvad's public connection-check APIs, which works for direct Mullvad connections and Tailscale sessions using Mullvad as an exit node.
 
-The torrent catalog lives at `/api/catalog/search`. It queries `data/torrents-catalog.parquet` with DuckDB. If the Parquet file is missing and `torrents-csv-data/torrents.csv` exists, the server will generate the Parquet file on the first catalog request.
+The torrent search uses a local Harbor endpoint (`/api/prowlarr/search`) that proxies to Prowlarr `/api/v1/search` with your server-side API key.
 
 The app also exposes `/api/history/download-speed`. While the dev or preview server is running, Harbor saves Transmission download-speed samples into a local SQLite database, serves the latest week as chart data, and prunes rows older than 7 days. On macOS the default path is `~/Library/Application Support/harbor-transmission/harbor-history.sqlite`. Override it with `HARBOR_HISTORY_DATABASE_PATH` if needed.
 
 `bun run dev` now starts Vite with `--host`, so it binds on your LAN and can be opened from your phone using the network URL shown in the terminal.
 
-## Optional local configuration
+## Configuration
 
-Create a `.env.local` file if your daemon is not at the default endpoint or if your local RPC requires basic auth during development.
+Create a `.env.local` file to configure your services:
 
 ```bash
 TRANSMISSION_RPC_TARGET=http://127.0.0.1:9091
 TRANSMISSION_RPC_USERNAME=
 TRANSMISSION_RPC_PASSWORD=
+PROWLARR_TARGET=http://localhost:9696
+PROWLARR_API_KEY=
 VITE_TRANSMISSION_RPC_URL=/transmission/rpc
-VITE_TORRENT_CATALOG_URL=/api/catalog/search
 VITE_MULLVAD_STATUS_URL=/api/mullvad/status
 ```
 
-Notes:
+### Environment Variables
 
-- `TRANSMISSION_RPC_TARGET`, `TRANSMISSION_RPC_USERNAME`, and `TRANSMISSION_RPC_PASSWORD` are used by the Vite dev proxy.
-- `VITE_TRANSMISSION_RPC_URL` is the client-side RPC URL. The default is `/transmission/rpc`.
-- `VITE_TORRENT_CATALOG_URL` is the client-side DuckDB search endpoint. The default is `/api/catalog/search`.
-- `VITE_MULLVAD_STATUS_URL` is the client-side Mullvad status URL. The default is `/api/mullvad/status`.
-- For a production/static deployment, serve the built app behind a proxy that exposes Transmission RPC at the same origin, or set `VITE_TRANSMISSION_RPC_URL` to a compatible endpoint.
-- For a production/static deployment, expose same-origin endpoints compatible with `/api/catalog/search`, `/api/mullvad/status`, and `/api/history/download-speed`, or point the client at compatible replacements.
+- `TRANSMISSION_RPC_TARGET` - Transmission RPC endpoint for dev proxy (server-side)
+- `TRANSMISSION_RPC_USERNAME` - Transmission RPC username (server-side)
+- `TRANSMISSION_RPC_PASSWORD` - Transmission RPC password (server-side)
+- `PROWLARR_TARGET` - Prowlarr API base URL for the local Harbor proxy (server-side)
+- `PROWLARR_API_KEY` - Prowlarr API key used by the local Harbor proxy (server-side)
+- `VITE_TRANSMISSION_RPC_URL` - Client-side Transmission RPC URL (default: `/transmission/rpc`)
+- `VITE_MULLVAD_STATUS_URL` - Mullvad status endpoint (default: `/api/mullvad/status`)
+
+### Prowlarr Setup
+
+1. Ensure Prowlarr is running and accessible
+2. Add Prowlarr server settings to `.env.local`:
+   ```bash
+   PROWLARR_TARGET=http://localhost:9696
+   PROWLARR_API_KEY=your-prowlarr-api-key
+   ```
+3. Restart the dev server
 
 ## Scripts
 
 ```bash
-bun run catalog:build
 bun run history:verify
 bun run dev
 bun run build
@@ -76,9 +86,11 @@ bun run preview
   - `transmission/web/src/remote.js`
   - `transmission/web/src/torrent.js`
   - `transmission/web/src/torrent-row.js`
+- Prowlarr API documentation: https://prowlarr.wiki/information/api
 
 ## Current limitations
 
-- Production use still needs same-origin infrastructure for Transmission RPC, catalog search, and Mullvad status, or explicit compatible endpoint URLs for all three.
+- Production use still needs same-origin infrastructure for Transmission RPC, or explicit compatible endpoint URLs.
+- Prowlarr must be accessible from the client environment for torrent search to work.
 - The weekly history chart only fills while Harbor's own server process is running, because the 30-second sampler lives in the local Vite middleware.
 - The demo mode is intentional fallback UI for disconnected development; it is not a daemon simulator.

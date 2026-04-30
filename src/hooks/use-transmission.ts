@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-import { getTorrentMagnetLink, type CatalogTorrent } from '@/lib/catalog'
+import { getCatalogTorrentSourceUrl, type CatalogTorrent } from '@/lib/catalog'
 import { demoSnapshot } from '@/lib/demo-data'
 import {
   MullvadStatusClient,
@@ -91,7 +91,7 @@ function createDemoCatalogTorrent(
     file_count: 1,
     primary_mime_type: 'application/x-bittorrent',
     hash_string: torrent.infohash,
-    magnet_link: getTorrentMagnetLink(torrent.infohash),
+    magnet_link: getCatalogTorrentSourceUrl(torrent),
     is_private: false,
     comment: 'Added from Harbor catalog',
     creator: 'Harbor',
@@ -431,7 +431,7 @@ export function useTransmission() {
       await runAction(
         `catalog-${torrent.infohash}`,
         () =>
-          client.addTorrentByUrl(getTorrentMagnetLink(torrent.infohash), {
+          client.addTorrentByUrl(getCatalogTorrentSourceUrl(torrent), {
             downloadDir: snapshot.session.download_dir,
             paused: snapshot.session.start_added_torrents === false,
           }),

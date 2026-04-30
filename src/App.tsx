@@ -750,11 +750,10 @@ function CatalogSection({
       <div className="w-full min-w-0 px-3 py-4 sm:px-5 lg:px-6">
         <div className="space-y-1">
           <h2 className="font-display text-2xl tracking-[-0.06em] text-foreground">
-            Catalog
+            Search
           </h2>
           <p className="text-sm text-muted-foreground">
-            Search the local Parquet mirror generated from{" "}
-            <code>torrents-csv-data</code> and send the matching magnet link to
+            Search for torrents using Prowlarr and send the matching magnet link to
             Transmission with one tap.
           </p>
         </div>
@@ -762,9 +761,9 @@ function CatalogSection({
         <div className="mt-3 relative min-w-0">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            aria-label="Search catalog"
+            aria-label="Search torrents"
             className="h-10 rounded-none border-x-0 border-t-0 border-b border-border bg-transparent px-0 pl-9 pr-9 shadow-none focus-visible:ring-0"
-            placeholder="Search catalog by title or paste a full infohash"
+            placeholder="Search torrent title or paste a full infohash"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
           />
@@ -782,7 +781,7 @@ function CatalogSection({
 
         {!trimmedQuery ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            Start typing to search the local catalog.
+            Start typing to search Prowlarr.
           </p>
         ) : !canSearch ? (
           <p className="mt-3 text-sm text-muted-foreground">
@@ -793,7 +792,7 @@ function CatalogSection({
         {error ? (
           <div className="mt-4 border-y border-border bg-muted/35 px-3 py-3 text-sm">
             <p className="font-semibold text-foreground">
-              Catalog search is unavailable.
+              Search is unavailable.
             </p>
             <p className="mt-1 text-muted-foreground">{error}</p>
           </div>
@@ -804,10 +803,10 @@ function CatalogSection({
             <div className="border-b border-border py-12 text-center">
               <RefreshCw className="mx-auto size-8 animate-spin text-muted-foreground" />
               <p className="mt-3 font-medium text-foreground">
-                Searching the Parquet catalog.
+                Searching Prowlarr.
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                DuckDB is scanning the local dataset for the strongest matches.
+                Looking for available torrents from your indexers.
               </p>
             </div>
           ) : results.length > 0 ? (
@@ -823,10 +822,10 @@ function CatalogSection({
             <div className="border-b border-border py-12 text-center">
               <Layers3 className="mx-auto size-8 text-muted-foreground" />
               <p className="mt-3 font-medium text-foreground">
-                No catalog matches found.
+                No torrents found.
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Try a broader title fragment or paste the exact infohash.
+                Try a different search term or broader title fragment.
               </p>
             </div>
           ) : null}

@@ -4,9 +4,9 @@ import { fileURLToPath, URL } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
 
-import { torrentCatalogPlugin } from './server/catalog'
 import { transmissionHistoryPlugin } from './server/history'
 import { mullvadStatusPlugin } from './server/mullvad'
+import { prowlarrSearchPlugin } from './server/prowlarr'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -14,13 +14,15 @@ export default defineConfig(({ mode }) => {
   const target = env.TRANSMISSION_RPC_TARGET || 'http://127.0.0.1:9091'
   const username = env.TRANSMISSION_RPC_USERNAME
   const password = env.TRANSMISSION_RPC_PASSWORD || ''
+  const prowlarrTarget = env.PROWLARR_TARGET || 'http://localhost:9696'
+  const prowlarrApiKey = env.PROWLARR_API_KEY
 
   return {
     plugins: [
       react(),
-      torrentCatalogPlugin(),
       transmissionHistoryPlugin({ target, username, password }),
       mullvadStatusPlugin(),
+      prowlarrSearchPlugin({ target: prowlarrTarget, apiKey: prowlarrApiKey }),
     ],
     resolve: {
       alias: {
