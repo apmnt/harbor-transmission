@@ -1031,7 +1031,7 @@ function CatalogResultRow({
             {torrent.name}
           </h3>
 
-          <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">
             <TorrentMeta
               label="Size"
               value={
@@ -1043,6 +1043,7 @@ function CatalogResultRow({
               label="Published"
               value={formatCatalogPublishedAt(torrent)}
             />
+            <TorrentMeta label="Source" value={formatCatalogSource(torrent)} />
           </div>
 
           <p className="break-all font-mono text-[11px] text-muted-foreground">
@@ -1927,6 +1928,10 @@ function formatCatalogPublishedAt(torrent: CatalogTorrent) {
   const timestamp =
     torrent.published ?? torrent.createdUnix ?? torrent.scrapedDate;
   return timestamp ? formatTimestamp(timestamp) : "N/A";
+}
+
+function formatCatalogSource(torrent: CatalogTorrent) {
+  return torrent.source ?? "Unknown";
 }
 
 function formatHistoryAxisLabel(timestampMs: number) {

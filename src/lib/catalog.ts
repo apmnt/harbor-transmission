@@ -1,6 +1,7 @@
 export interface CatalogTorrent {
   infohash: string
   sourceUrl: string | null
+  source: string | null
   name: string
   sizeBytes: number | null
   createdUnix: number | null
@@ -30,6 +31,7 @@ interface ProwlarrSearchResult {
   magnetUrl?: string
   downloadUrl?: string
   guid?: string
+  indexer?: string
   indexerName?: string
 }
 
@@ -90,6 +92,7 @@ function normalizeProwlarrResult(result: ProwlarrSearchResult): CatalogTorrent |
   return {
     infohash,
     sourceUrl,
+    source: maybeString(result.indexerName) ?? maybeString(result.indexer),
     name: result.title || 'Unknown torrent',
     sizeBytes: result.size ?? null,
     createdUnix: parseProwlarrDate(result.publishDate),
@@ -99,6 +102,22 @@ function normalizeProwlarrResult(result: ProwlarrSearchResult): CatalogTorrent |
     scrapedDate: null,
     published: parseProwlarrDate(result.publishDate),
   }
+}
+
+function compareCatalogTorrents(a: CatalogTorrent, b: CatalogTorrent) {
+  const aSeeders = a.seeders ?? -1
+  const bSeeders = b.seeders ?? -1
+  if (aSeeders !== bSeeders) {
+    return bSeeders - aSeeders
+  }
+
+  const aLeechers = a.leechers ?? -1
+  const bLeechers = b.leechers ?? -1
+  if (aLeechers !== bLeechers) {
+    return bLeechers - aLeechers
+  }
+
+  return a.name.localeCompare(b.name)
 }
 
 export function normalizeCatalogSearchQuery(query: string) {
@@ -175,15 +194,17 @@ export class TorrentCatalogClient {
     }
 
     const data = (await response.json()) as ProwlarrSearchResult[]
-    const results = data
+    const normalizedResults = data
       .map(normalizeProwlarrResult)
       .filter((r): r is CatalogTorrent => r !== null)
+      .sort(compareCatalogTorrents)
+    const results = normalizedResults
       .slice(offset, offset + limit)
 
     return {
       query: normalizedQuery,
       results,
-      hasMore: data.length > offset + limit,
+      hasMore: normalizedResults.length > offset + limit,
       limit,
       offset,
     } satisfies CatalogSearchResponse
