@@ -44,6 +44,7 @@ TRANSMISSION_RPC_USERNAME=
 TRANSMISSION_RPC_PASSWORD=
 PROWLARR_TARGET=http://localhost:9696
 PROWLARR_API_KEY=
+PROWLARR_TIMEOUT_MS=20000
 VITE_TRANSMISSION_RPC_URL=/transmission/rpc
 VITE_MULLVAD_STATUS_URL=/api/mullvad/status
 ```
@@ -55,6 +56,7 @@ VITE_MULLVAD_STATUS_URL=/api/mullvad/status
 - `TRANSMISSION_RPC_PASSWORD` - Transmission RPC password (server-side)
 - `PROWLARR_TARGET` - Prowlarr API base URL for the local Harbor proxy (server-side)
 - `PROWLARR_API_KEY` - Prowlarr API key used by the local Harbor proxy (server-side)
+- `PROWLARR_TIMEOUT_MS` - Prowlarr request timeout in milliseconds for Harbor's local proxy (default: `20000`)
 - `VITE_TRANSMISSION_RPC_URL` - Client-side Transmission RPC URL (default: `/transmission/rpc`)
 - `VITE_MULLVAD_STATUS_URL` - Mullvad status endpoint (default: `/api/mullvad/status`)
 

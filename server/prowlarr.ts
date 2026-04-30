@@ -5,7 +5,8 @@ import type { Plugin } from 'vite'
 
 const PROWLARR_SEARCH_ROUTE = '/api/prowlarr/search'
 const PROWLARR_DOWNLOAD_ROUTE = '/api/prowlarr/download'
-const REQUEST_TIMEOUT_MS = 8_000
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
+const SEARCH_CACHE_TTL_MS = 15_000
 
 interface MiddlewareStack {
   use: (
@@ -16,12 +17,26 @@ interface MiddlewareStack {
 interface ProwlarrSearchPluginOptions {
   target: string
   apiKey?: string
+  timeoutMs?: number
 }
 
 interface ProwlarrSearchResult {
   downloadUrl?: unknown
   [key: string]: unknown
 }
+
+interface UpstreamError {
+  status: number
+  message: string
+}
+
+interface CachedSearchEntry {
+  expiresAt: number
+  payload: ProwlarrSearchResult[]
+}
+
+const searchCache = new Map<string, CachedSearchEntry>()
+const inFlightSearches = new Map<string, Promise<ProwlarrSearchResult[]>>()
 
 function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {
   res.statusCode = statusCode
@@ -42,6 +57,15 @@ function getErrorMessage(error: unknown) {
   }
 
   return 'Unable to query Prowlarr.'
+}
+
+function isUpstreamError(error: unknown): error is UpstreamError {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const candidate = error as Partial<UpstreamError>
+  return typeof candidate.status === 'number' && typeof candidate.message === 'string'
 }
 
 function parseQuery(req: IncomingMessage) {
@@ -104,7 +128,34 @@ function normalizeSearchResults(payload: unknown, target: string): ProwlarrSearc
   })
 }
 
-function createSearchRouteHandler({ apiKey, target }: ProwlarrSearchPluginOptions) {
+function getCachedSearch(query: string) {
+  const cacheKey = query.toLowerCase()
+  const cached = searchCache.get(cacheKey)
+  if (!cached) {
+    return null
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    searchCache.delete(cacheKey)
+    return null
+  }
+
+  return cached.payload
+}
+
+function setCachedSearch(query: string, payload: ProwlarrSearchResult[]) {
+  const cacheKey = query.toLowerCase()
+  searchCache.set(cacheKey, {
+    expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+    payload,
+  })
+}
+
+function createSearchRouteHandler({
+  apiKey,
+  target,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+}: ProwlarrSearchPluginOptions) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== 'GET') {
       writeMethodNotAllowed(res)
@@ -125,31 +176,64 @@ function createSearchRouteHandler({ apiKey, target }: ProwlarrSearchPluginOption
       return
     }
 
-    try {
-      const response = await fetch(createSearchUrl(target, query), {
-        headers: {
-          'X-Api-Key': apiKey,
-          'cache-control': 'no-cache',
-        },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      })
+    const cached = getCachedSearch(query)
+    if (cached) {
+      writeJson(res, 200, cached)
+      return
+    }
 
-      if (!response.ok) {
-        const message = await response.text()
-        res.statusCode = response.status
-        res.end(message || `Prowlarr search failed with ${response.status}.`)
+    try {
+      const cacheKey = query.toLowerCase()
+      const existingSearch = inFlightSearches.get(cacheKey)
+      const pendingSearch =
+        existingSearch ??
+        (async () => {
+          const response = await fetch(createSearchUrl(target, query), {
+            headers: {
+              'X-Api-Key': apiKey,
+              'cache-control': 'no-cache',
+            },
+            signal: AbortSignal.timeout(timeoutMs),
+          })
+
+          if (!response.ok) {
+            const message = await response.text()
+            throw {
+              status: response.status,
+              message: message || `Prowlarr search failed with ${response.status}.`,
+            } satisfies UpstreamError
+          }
+
+          const payload = await response.json()
+          return normalizeSearchResults(payload, target)
+        })()
+
+      if (!existingSearch) {
+        inFlightSearches.set(cacheKey, pendingSearch)
+      }
+
+      const normalizedResults = await pendingSearch
+      setCachedSearch(query, normalizedResults)
+      writeJson(res, 200, normalizedResults)
+    } catch (error) {
+      if (isUpstreamError(error)) {
+        res.statusCode = error.status
+        res.end(error.message)
         return
       }
 
-      const payload = await response.json()
-      writeJson(res, 200, normalizeSearchResults(payload, target))
-    } catch (error) {
       writeJson(res, 502, { error: getErrorMessage(error) })
+    } finally {
+      inFlightSearches.delete(query.toLowerCase())
     }
   }
 }
 
-function createDownloadRouteHandler({ apiKey, target }: ProwlarrSearchPluginOptions) {
+function createDownloadRouteHandler({
+  apiKey,
+  target,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+}: ProwlarrSearchPluginOptions) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== 'GET') {
       writeMethodNotAllowed(res)
@@ -180,7 +264,7 @@ function createDownloadRouteHandler({ apiKey, target }: ProwlarrSearchPluginOpti
     try {
       const response = await fetch(upstream, {
         redirect: 'manual',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       })
 
       const location = response.headers.get('location')

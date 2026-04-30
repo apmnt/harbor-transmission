@@ -18,6 +18,7 @@ interface TorrentCatalogState {
 }
 
 const SEARCH_LIMIT = 10
+const SEARCH_DEBOUNCE_MS = 140
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to query the torrent catalog.'
@@ -110,7 +111,7 @@ export function useTorrentCatalog() {
             results: [],
           })
         })
-    }, 220)
+    }, SEARCH_DEBOUNCE_MS)
 
     return () => {
       controller.abort()

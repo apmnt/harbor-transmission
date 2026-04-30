@@ -16,13 +16,22 @@ export default defineConfig(({ mode }) => {
   const password = env.TRANSMISSION_RPC_PASSWORD || ''
   const prowlarrTarget = env.PROWLARR_TARGET || 'http://localhost:9696'
   const prowlarrApiKey = env.PROWLARR_API_KEY
+  const parsedProwlarrTimeoutMs = Number.parseInt(env.PROWLARR_TIMEOUT_MS || '', 10)
+  const prowlarrTimeoutMs =
+    Number.isFinite(parsedProwlarrTimeoutMs) && parsedProwlarrTimeoutMs > 0
+      ? parsedProwlarrTimeoutMs
+      : 20_000
 
   return {
     plugins: [
       react(),
       transmissionHistoryPlugin({ target, username, password }),
       mullvadStatusPlugin(),
-      prowlarrSearchPlugin({ target: prowlarrTarget, apiKey: prowlarrApiKey }),
+      prowlarrSearchPlugin({
+        target: prowlarrTarget,
+        apiKey: prowlarrApiKey,
+        timeoutMs: prowlarrTimeoutMs,
+      }),
     ],
     resolve: {
       alias: {
