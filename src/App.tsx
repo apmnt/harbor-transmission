@@ -199,29 +199,6 @@ function App() {
       />
 
       <CatalogSection
-        activeQuery={prowlarrCatalog.activeQuery}
-        canSearch={prowlarrCatalog.canSearch}
-        description="Search torrents from your Prowlarr indexers and add matching releases to Transmission."
-        emptyBody="Try a different search term or broader title fragment."
-        emptyTitle="No Prowlarr results found."
-        error={prowlarrCatalog.error}
-        hasMore={prowlarrCatalog.hasMore}
-        hasSearched={prowlarrCatalog.hasSearched}
-        isLoading={prowlarrCatalog.isLoading}
-        isLoadingMore={prowlarrCatalog.isLoadingMore}
-        loadMoreLabel="Load more from Prowlarr"
-        loadingBody="Looking for available torrents from your indexers."
-        loadingTitle="Searching Prowlarr."
-        onAddTorrent={addCatalogTorrent}
-        onLoadMore={prowlarrCatalog.loadMore}
-        onQueryChange={prowlarrCatalog.setQuery}
-        pendingAction={pendingAction}
-        query={prowlarrCatalog.query}
-        results={prowlarrCatalog.results}
-        title="Prowlarr Search"
-      />
-
-      <CatalogSection
         activeQuery={localCatalog.activeQuery}
         canSearch={localCatalog.canSearch}
         description="Search the local torrents-csv mirror and add matching magnet links to Transmission."
@@ -238,10 +215,35 @@ function App() {
         onAddTorrent={addCatalogTorrent}
         onLoadMore={localCatalog.loadMore}
         onQueryChange={localCatalog.setQuery}
+        onSearch={localCatalog.search}
         pendingAction={pendingAction}
         query={localCatalog.query}
         results={localCatalog.results}
         title="torrents-csv Search"
+      />
+
+      <CatalogSection
+        activeQuery={prowlarrCatalog.activeQuery}
+        canSearch={prowlarrCatalog.canSearch}
+        description="Search torrents from your Prowlarr indexers and add matching releases to Transmission."
+        emptyBody="Try a different search term or broader title fragment."
+        emptyTitle="No Prowlarr results found."
+        error={prowlarrCatalog.error}
+        hasMore={prowlarrCatalog.hasMore}
+        hasSearched={prowlarrCatalog.hasSearched}
+        isLoading={prowlarrCatalog.isLoading}
+        isLoadingMore={prowlarrCatalog.isLoadingMore}
+        loadMoreLabel="Load more from Prowlarr"
+        loadingBody="Looking for available torrents from your indexers."
+        loadingTitle="Searching Prowlarr."
+        onAddTorrent={addCatalogTorrent}
+        onLoadMore={prowlarrCatalog.loadMore}
+        onQueryChange={prowlarrCatalog.setQuery}
+        onSearch={prowlarrCatalog.search}
+        pendingAction={pendingAction}
+        query={prowlarrCatalog.query}
+        results={prowlarrCatalog.results}
+        title="Prowlarr Search"
       />
 
       <DownloadHistorySection
@@ -772,6 +774,7 @@ function CatalogSection({
   onAddTorrent,
   onLoadMore,
   onQueryChange,
+  onSearch,
   pendingAction,
   query,
   results,
@@ -793,6 +796,7 @@ function CatalogSection({
   onAddTorrent: (torrent: CatalogTorrent) => Promise<void>;
   onLoadMore: () => Promise<void>;
   onQueryChange: (value: string) => void;
+  onSearch: () => Promise<void>;
   pendingAction: string | null;
   query: string;
   results: CatalogTorrent[];
@@ -817,9 +821,15 @@ function CatalogSection({
           <Input
             aria-label="Search torrents"
             className="h-10 rounded-none border-x-0 border-t-0 border-b border-border bg-transparent px-0 pl-9 pr-9 shadow-none focus-visible:ring-0"
-            placeholder="Search torrent title or paste a full infohash"
+            placeholder="Type a query and press Enter"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void onSearch();
+              }
+            }}
           />
           {query ? (
             <button
@@ -835,7 +845,7 @@ function CatalogSection({
 
         {!trimmedQuery ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            Start typing to search.
+            Type a query, then press Enter to search.
           </p>
         ) : !canSearch ? (
           <p className="mt-3 text-sm text-muted-foreground">

@@ -357,7 +357,15 @@ function createResolveRouteHandler({
         return
       }
 
-      writeJson(res, 400, { error: 'Prowlarr returned a torrent payload instead of a redirect URL.' })
+      const payload = Buffer.from(await response.arrayBuffer())
+      if (payload.length < 1) {
+        writeJson(res, 400, {
+          error: 'Prowlarr returned an empty torrent payload.',
+        })
+        return
+      }
+
+      writeJson(res, 200, { metainfo: payload.toString('base64') })
     } catch (error) {
       writeJson(res, 502, { error: getErrorMessage(error) })
     }

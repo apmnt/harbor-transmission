@@ -148,15 +148,19 @@ export function getCatalogTorrentSourceUrl(torrent: CatalogTorrent) {
   return sourceUrl
 }
 
-export async function resolveCatalogTorrentSourceUrl(torrent: CatalogTorrent) {
+export type ResolvedCatalogTorrentSource = { url: string } | { metainfo: string }
+
+export async function resolveCatalogTorrentSourceUrl(
+  torrent: CatalogTorrent,
+): Promise<ResolvedCatalogTorrentSource> {
   const sourceUrl = getCatalogTorrentSourceUrl(torrent)
   if (!sourceUrl.startsWith(window.location.origin)) {
-    return sourceUrl
+    return { url: sourceUrl }
   }
 
   const parsed = new URL(sourceUrl)
   if (parsed.pathname !== '/api/prowlarr/download') {
-    return sourceUrl
+    return { url: sourceUrl }
   }
 
   const resolveUrl = new URL('/api/prowlarr/resolve', window.location.origin)
@@ -173,13 +177,22 @@ export async function resolveCatalogTorrentSourceUrl(torrent: CatalogTorrent) {
     throw new Error(message || `Prowlarr resolve failed with ${response.status}.`)
   }
 
-  const payload = (await response.json()) as { url?: unknown }
-  const resolved = typeof payload.url === 'string' ? payload.url : ''
-  if (!resolved) {
-    throw new Error('Prowlarr did not return a usable download URL.')
+  const payload = (await response.json()) as {
+    metainfo?: unknown
+    url?: unknown
+  }
+  const resolvedUrl = typeof payload.url === 'string' ? payload.url : null
+  if (resolvedUrl) {
+    return { url: resolvedUrl }
   }
 
-  return resolved
+  const resolvedMetainfo =
+    typeof payload.metainfo === 'string' ? payload.metainfo : null
+  if (resolvedMetainfo) {
+    return { metainfo: resolvedMetainfo }
+  }
+
+  throw new Error('Prowlarr did not return a usable download source.')
 }
 
 export class TorrentCatalogClient {

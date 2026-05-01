@@ -435,12 +435,18 @@ export function useTransmission() {
       await runAction(
         `catalog-${torrent.actionKey}`,
         () =>
-          resolveCatalogTorrentSourceUrl(torrent).then((url) =>
-            client.addTorrentByUrl(url, {
+          resolveCatalogTorrentSourceUrl(torrent).then((source) => {
+            const options = {
               downloadDir: snapshot.session.download_dir,
               paused: snapshot.session.start_added_torrents === false,
-            }),
-          ),
+            }
+
+            if ('url' in source) {
+              return client.addTorrentByUrl(source.url, options)
+            }
+
+            return client.addTorrentByMetainfo(source.metainfo, options)
+          }),
         (current) => {
           if (current.torrents.some((value) => value.hash_string === torrent.infohash)) {
             return {
