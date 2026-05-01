@@ -7,6 +7,7 @@ import { defineConfig, loadEnv } from 'vite'
 import { transmissionHistoryPlugin } from './server/history'
 import { mullvadStatusPlugin } from './server/mullvad'
 import { prowlarrSearchPlugin } from './server/prowlarr'
+import { torrentCatalogPlugin } from './server/catalog'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -25,6 +26,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
+      torrentCatalogPlugin(),
       transmissionHistoryPlugin({ target, username, password }),
       mullvadStatusPlugin(),
       prowlarrSearchPlugin({

@@ -5,6 +5,7 @@ import type { Plugin } from 'vite'
 
 const PROWLARR_SEARCH_ROUTE = '/api/prowlarr/search'
 const PROWLARR_DOWNLOAD_ROUTE = '/api/prowlarr/download'
+const PROWLARR_RESOLVE_ROUTE = '/api/prowlarr/resolve'
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
 const SEARCH_CACHE_TTL_MS = 15_000
 
@@ -75,7 +76,7 @@ function parseQuery(req: IncomingMessage) {
 }
 
 function parseDownloadParams(req: IncomingMessage) {
-  const url = new URL(req.url ?? PROWLARR_DOWNLOAD_ROUTE, 'http://127.0.0.1')
+  const url = new URL(req.url ?? PROWLARR_RESOLVE_ROUTE, 'http://127.0.0.1')
   const path = url.searchParams.get('path') ?? ''
   const link = url.searchParams.get('link') ?? ''
   const file = url.searchParams.get('file')
@@ -302,12 +303,74 @@ function createDownloadRouteHandler({
   }
 }
 
+function createResolveRouteHandler({
+  apiKey,
+  target,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+}: ProwlarrSearchPluginOptions) {
+  return async (req: IncomingMessage, res: ServerResponse) => {
+    if (req.method !== 'GET') {
+      writeMethodNotAllowed(res)
+      return
+    }
+
+    if (!apiKey) {
+      writeJson(res, 500, {
+        error:
+          'Prowlarr API key is not configured. Set PROWLARR_API_KEY in your environment.',
+      })
+      return
+    }
+
+    const { file, link, path } = parseDownloadParams(req)
+    if (!path.startsWith('/') || !path.endsWith('/download') || !link) {
+      writeJson(res, 400, { error: 'Invalid Prowlarr resolve request.' })
+      return
+    }
+
+    const upstream = new URL(path, target)
+    upstream.searchParams.set('apikey', apiKey)
+    upstream.searchParams.set('link', link)
+    if (file) {
+      upstream.searchParams.set('file', file)
+    }
+
+    try {
+      const response = await fetch(upstream, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+
+      const location = response.headers.get('location')
+      if (response.status >= 300 && response.status < 400 && location) {
+        const resolvedUrl = location.startsWith('/')
+          ? new URL(location, target).toString()
+          : location
+        writeJson(res, 200, { url: resolvedUrl })
+        return
+      }
+
+      if (!response.ok) {
+        const message = await response.text()
+        res.statusCode = response.status
+        res.end(message || `Prowlarr resolve failed with ${response.status}.`)
+        return
+      }
+
+      writeJson(res, 400, { error: 'Prowlarr returned a torrent payload instead of a redirect URL.' })
+    } catch (error) {
+      writeJson(res, 502, { error: getErrorMessage(error) })
+    }
+  }
+}
+
 function attachProwlarrRoutes(
   middlewares: MiddlewareStack,
   options: ProwlarrSearchPluginOptions,
 ) {
   const searchHandler = createSearchRouteHandler(options)
   const downloadHandler = createDownloadRouteHandler(options)
+  const resolveHandler = createResolveRouteHandler(options)
 
   middlewares.use((req, res, next) => {
     const pathname = req.url?.split('?')[0]
@@ -321,7 +384,16 @@ function attachProwlarrRoutes(
       return
     }
 
-    if (pathname !== PROWLARR_SEARCH_ROUTE && pathname !== PROWLARR_DOWNLOAD_ROUTE) {
+    if (pathname === PROWLARR_RESOLVE_ROUTE) {
+      void resolveHandler(req, res)
+      return
+    }
+
+    if (
+      pathname !== PROWLARR_SEARCH_ROUTE &&
+      pathname !== PROWLARR_DOWNLOAD_ROUTE &&
+      pathname !== PROWLARR_RESOLVE_ROUTE
+    ) {
       next()
     }
   })

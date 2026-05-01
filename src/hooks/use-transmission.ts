@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-import { getCatalogTorrentSourceUrl, type CatalogTorrent } from '@/lib/catalog'
+import {
+  getCatalogTorrentSourceUrl,
+  resolveCatalogTorrentSourceUrl,
+  type CatalogTorrent,
+} from '@/lib/catalog'
 import { demoSnapshot } from '@/lib/demo-data'
 import {
   MullvadStatusClient,
@@ -429,12 +433,14 @@ export function useTransmission() {
   const addCatalogTorrent = useCallback(
     async (torrent: CatalogTorrent) => {
       await runAction(
-        `catalog-${torrent.infohash}`,
+        `catalog-${torrent.actionKey}`,
         () =>
-          client.addTorrentByUrl(getCatalogTorrentSourceUrl(torrent), {
-            downloadDir: snapshot.session.download_dir,
-            paused: snapshot.session.start_added_torrents === false,
-          }),
+          resolveCatalogTorrentSourceUrl(torrent).then((url) =>
+            client.addTorrentByUrl(url, {
+              downloadDir: snapshot.session.download_dir,
+              paused: snapshot.session.start_added_torrents === false,
+            }),
+          ),
         (current) => {
           if (current.torrents.some((value) => value.hash_string === torrent.infohash)) {
             return {

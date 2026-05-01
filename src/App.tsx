@@ -44,6 +44,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useDownloadHistory } from "@/hooks/use-download-history";
+import { useLocalTorrentCatalog } from "@/hooks/use-local-torrent-catalog";
 import { useTorrentCatalog } from "@/hooks/use-torrent-catalog";
 import { useTransmission } from "@/hooks/use-transmission";
 import type { DownloadHistoryResponse } from "@/lib/download-history";
@@ -131,7 +132,8 @@ function App() {
     isLive: isLiveConnection,
     liveDownloadSpeedBps: snapshot.stats.download_speed,
   });
-  const catalog = useTorrentCatalog();
+  const prowlarrCatalog = useTorrentCatalog();
+  const localCatalog = useLocalTorrentCatalog();
   const [filter, setFilter] = useState<TorrentFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("queue");
   const [query, setQuery] = useState("");
@@ -197,16 +199,49 @@ function App() {
       />
 
       <CatalogSection
-        activeQuery={catalog.activeQuery}
-        canSearch={catalog.canSearch}
-        error={catalog.error}
-        hasSearched={catalog.hasSearched}
-        isLoading={catalog.isLoading}
+        activeQuery={prowlarrCatalog.activeQuery}
+        canSearch={prowlarrCatalog.canSearch}
+        description="Search torrents from your Prowlarr indexers and add matching releases to Transmission."
+        emptyBody="Try a different search term or broader title fragment."
+        emptyTitle="No Prowlarr results found."
+        error={prowlarrCatalog.error}
+        hasMore={prowlarrCatalog.hasMore}
+        hasSearched={prowlarrCatalog.hasSearched}
+        isLoading={prowlarrCatalog.isLoading}
+        isLoadingMore={prowlarrCatalog.isLoadingMore}
+        loadMoreLabel="Load more from Prowlarr"
+        loadingBody="Looking for available torrents from your indexers."
+        loadingTitle="Searching Prowlarr."
         onAddTorrent={addCatalogTorrent}
-        onQueryChange={catalog.setQuery}
+        onLoadMore={prowlarrCatalog.loadMore}
+        onQueryChange={prowlarrCatalog.setQuery}
         pendingAction={pendingAction}
-        query={catalog.query}
-        results={catalog.results}
+        query={prowlarrCatalog.query}
+        results={prowlarrCatalog.results}
+        title="Prowlarr Search"
+      />
+
+      <CatalogSection
+        activeQuery={localCatalog.activeQuery}
+        canSearch={localCatalog.canSearch}
+        description="Search the local torrents-csv mirror and add matching magnet links to Transmission."
+        emptyBody="Try a broader title fragment or paste the exact infohash."
+        emptyTitle="No local catalog matches found."
+        error={localCatalog.error}
+        hasMore={localCatalog.hasMore}
+        hasSearched={localCatalog.hasSearched}
+        isLoading={localCatalog.isLoading}
+        isLoadingMore={localCatalog.isLoadingMore}
+        loadMoreLabel="Load more local matches"
+        loadingBody="DuckDB is scanning the local torrents-csv dataset for strong matches."
+        loadingTitle="Searching local catalog."
+        onAddTorrent={addCatalogTorrent}
+        onLoadMore={localCatalog.loadMore}
+        onQueryChange={localCatalog.setQuery}
+        pendingAction={pendingAction}
+        query={localCatalog.query}
+        results={localCatalog.results}
+        title="torrents-csv Search"
       />
 
       <DownloadHistorySection
@@ -723,25 +758,45 @@ function DownloadSpeedChart({
 function CatalogSection({
   activeQuery,
   canSearch,
+  description,
+  emptyBody,
+  emptyTitle,
   error,
+  hasMore,
   hasSearched,
   isLoading,
+  isLoadingMore,
+  loadMoreLabel,
+  loadingBody,
+  loadingTitle,
   onAddTorrent,
+  onLoadMore,
   onQueryChange,
   pendingAction,
   query,
   results,
+  title,
 }: {
   activeQuery: string;
   canSearch: boolean;
+  description: string;
+  emptyBody: string;
+  emptyTitle: string;
   error: string | null;
+  hasMore: boolean;
   hasSearched: boolean;
   isLoading: boolean;
+  isLoadingMore: boolean;
+  loadMoreLabel: string;
+  loadingBody: string;
+  loadingTitle: string;
   onAddTorrent: (torrent: CatalogTorrent) => Promise<void>;
+  onLoadMore: () => Promise<void>;
   onQueryChange: (value: string) => void;
   pendingAction: string | null;
   query: string;
   results: CatalogTorrent[];
+  title: string;
 }) {
   const trimmedQuery = query.trim();
 
@@ -750,11 +805,10 @@ function CatalogSection({
       <div className="w-full min-w-0 px-3 py-4 sm:px-5 lg:px-6">
         <div className="space-y-1">
           <h2 className="font-display text-2xl tracking-[-0.06em] text-foreground">
-            Search
+            {title}
           </h2>
           <p className="text-sm text-muted-foreground">
-            Search for torrents using Prowlarr and send the matching magnet link to
-            Transmission with one tap.
+            {description}
           </p>
         </div>
 
@@ -781,7 +835,7 @@ function CatalogSection({
 
         {!trimmedQuery ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            Start typing to search Prowlarr.
+            Start typing to search.
           </p>
         ) : !canSearch ? (
           <p className="mt-3 text-sm text-muted-foreground">
@@ -803,17 +857,17 @@ function CatalogSection({
             <div className="border-b border-border py-12 text-center">
               <RefreshCw className="mx-auto size-8 animate-spin text-muted-foreground" />
               <p className="mt-3 font-medium text-foreground">
-                Searching Prowlarr.
+                {loadingTitle}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Looking for available torrents from your indexers.
+                {loadingBody}
               </p>
             </div>
           ) : results.length > 0 ? (
             results.map((torrent) => (
               <CatalogResultRow
-                key={torrent.infohash}
-                isBusy={pendingAction === `catalog-${torrent.infohash}`}
+                key={torrent.actionKey}
+                isBusy={pendingAction === `catalog-${torrent.actionKey}`}
                 onAdd={() => onAddTorrent(torrent)}
                 torrent={torrent}
               />
@@ -822,10 +876,10 @@ function CatalogSection({
             <div className="border-b border-border py-12 text-center">
               <Layers3 className="mx-auto size-8 text-muted-foreground" />
               <p className="mt-3 font-medium text-foreground">
-                No torrents found.
+                {emptyTitle}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Try a different search term or broader title fragment.
+                {emptyBody}
               </p>
             </div>
           ) : null}
@@ -837,6 +891,24 @@ function CatalogSection({
               Showing {results.length} best matches
               {activeQuery ? ` for "${activeQuery}"` : ""}.
             </p>
+          </div>
+        ) : null}
+
+        {results.length > 0 && hasMore ? (
+          <div className="mt-3 flex justify-start">
+            <Button
+              className="rounded-none"
+              disabled={isLoadingMore}
+              onClick={() => void onLoadMore()}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {isLoadingMore ? (
+                <RefreshCw className="size-4 animate-spin" />
+              ) : null}
+              {isLoadingMore ? "Loading..." : loadMoreLabel}
+            </Button>
           </div>
         ) : null}
       </div>

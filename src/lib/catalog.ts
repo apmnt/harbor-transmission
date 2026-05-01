@@ -1,4 +1,5 @@
 export interface CatalogTorrent {
+  actionKey: string
   infohash: string
   sourceUrl: string | null
   source: string | null
@@ -48,20 +49,17 @@ function maybeString(value: unknown) {
 }
 
 function createPseudoInfohash(seed: string) {
-  let hash = 0x811c9dc5
-  let output = ''
+  const offsets = [0x811c9dc5, 0x9e3779b1, 0x85ebca6b, 0xc2b2ae35, 0x27d4eb2f]
+  const chunks = offsets.map((offset) => {
+    let hash = offset
+    for (let index = 0; index < seed.length; index += 1) {
+      hash ^= seed.charCodeAt(index)
+      hash = Math.imul(hash, 0x01000193) >>> 0
+    }
+    return hash.toString(16).padStart(8, '0')
+  })
 
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193) >>> 0
-    output += hash.toString(16).padStart(8, '0')
-  }
-
-  if (output.length === 0) {
-    output = '0'.repeat(40)
-  }
-
-  return (output + output).slice(0, 40)
+  return chunks.join('').slice(0, 40)
 }
 
 function parseProwlarrDate(dateStr: string | undefined): number | null {
@@ -85,11 +83,12 @@ function normalizeProwlarrResult(result: ProwlarrSearchResult): CatalogTorrent |
 
   if (!sourceUrl && !realInfohash) return null
 
-  const infohash =
-    realInfohash ??
-    createPseudoInfohash(sourceUrl ?? maybeString(result.guid) ?? result.title)
+  const fallbackSeed = `${sourceUrl ?? ''}|${maybeString(result.guid) ?? ''}|${result.title}`
+  const infohash = realInfohash ?? createPseudoInfohash(fallbackSeed)
+  const actionKey = createPseudoInfohash(`action|${fallbackSeed}`)
 
   return {
+    actionKey,
     infohash,
     sourceUrl,
     source: maybeString(result.indexerName) ?? maybeString(result.indexer),
@@ -147,6 +146,40 @@ export function getCatalogTorrentSourceUrl(torrent: CatalogTorrent) {
   }
 
   return sourceUrl
+}
+
+export async function resolveCatalogTorrentSourceUrl(torrent: CatalogTorrent) {
+  const sourceUrl = getCatalogTorrentSourceUrl(torrent)
+  if (!sourceUrl.startsWith(window.location.origin)) {
+    return sourceUrl
+  }
+
+  const parsed = new URL(sourceUrl)
+  if (parsed.pathname !== '/api/prowlarr/download') {
+    return sourceUrl
+  }
+
+  const resolveUrl = new URL('/api/prowlarr/resolve', window.location.origin)
+  resolveUrl.search = parsed.search
+
+  const response = await fetch(resolveUrl, {
+    headers: {
+      'cache-control': 'no-cache',
+    },
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || `Prowlarr resolve failed with ${response.status}.`)
+  }
+
+  const payload = (await response.json()) as { url?: unknown }
+  const resolved = typeof payload.url === 'string' ? payload.url : ''
+  if (!resolved) {
+    throw new Error('Prowlarr did not return a usable download URL.')
+  }
+
+  return resolved
 }
 
 export class TorrentCatalogClient {

@@ -11,6 +11,7 @@ The app is designed around Transmission's existing web interface and RPC model. 
 - Session telemetry panel for speed limits, queue settings, ratios, and free space
 - Mullvad VPN status with public exit detection, active usage, and current exit IP/location
 - Prowlarr-backed torrent search across your configured indexers
+- Local torrents-csv search backed by DuckDB + Parquet (`/api/catalog/search`)
 - Weekly download-speed history chart backed by a local 30-second SQLite history store
 - One-click magnet adds from search results using Transmission's native `torrent-add` URL flow
 - Torrent cards with queue state, progress, ETA, peer details, labels, and quick start/pause controls
@@ -21,6 +22,7 @@ The app is designed around Transmission's existing web interface and RPC model. 
 
 ```bash
 bun install
+bun run catalog:build
 bun run dev
 ```
 
@@ -29,6 +31,7 @@ By default the Vite dev server proxies `/transmission/*` to `http://127.0.0.1:90
 The app also exposes `/api/mullvad/status` during `bun run dev` and `bun run preview`. That endpoint queries Mullvad's public connection-check APIs, which works for direct Mullvad connections and Tailscale sessions using Mullvad as an exit node.
 
 The torrent search uses a local Harbor endpoint (`/api/prowlarr/search`) that proxies to Prowlarr `/api/v1/search` with your server-side API key.
+The local torrents-csv search uses `/api/catalog/search`. It reads `data/torrents-catalog.parquet`, and can generate that file from `torrents-csv-data/torrents.csv`.
 
 The app also exposes `/api/history/download-speed`. While the dev or preview server is running, Harbor saves Transmission download-speed samples into a local SQLite database, serves the latest week as chart data, and prunes rows older than 7 days. On macOS the default path is `~/Library/Application Support/harbor-transmission/harbor-history.sqlite`. Override it with `HARBOR_HISTORY_DATABASE_PATH` if needed.
 
@@ -73,6 +76,7 @@ VITE_MULLVAD_STATUS_URL=/api/mullvad/status
 ## Scripts
 
 ```bash
+bun run catalog:build
 bun run history:verify
 bun run dev
 bun run build
